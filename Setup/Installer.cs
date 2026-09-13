@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows;
 using Microsoft.Win32;
 
@@ -81,6 +82,41 @@ static class Installer
 
         report = $"Installato in {TargetDir}{(startup ? " · avvio con Windows attivo" : "")}" +
                  (desktop ? " · collegamento sul desktop" : "") + extra;
+    }
+
+    /// <summary>Aggiornamento: sostituisce i file, mantiene l'avvio automatico e i
+    /// collegamenti esistenti, poi riapre l'app.</summary>
+    public static void Update()
+    {
+        bool hadStartup;
+        try
+        {
+            using var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+            hadStartup = k?.GetValue(RunValue) != null;
+        }
+        catch { hadStartup = false; }
+
+        bool hadDesktop = File.Exists(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), $"{AppName}.lnk"));
+
+        foreach (var p in Process.GetProcessesByName("HWWidget"))
+        {
+            try { p.Kill(); p.WaitForExit(5000); } catch { }
+        }
+        Thread.Sleep(600);
+
+        Install(hadStartup, hadDesktop, false, out _);
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = TargetExe,
+                WorkingDirectory = TargetDir,
+                UseShellExecute = true,
+            });
+        }
+        catch { }
     }
 
     public static void Uninstall(bool silent)

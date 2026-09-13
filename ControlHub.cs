@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -290,11 +292,66 @@ sealed class ControlHub : Window
             TextButton("Crea", () => Add("net"))));
         _content.Children.Add(Card("\uE9D9", "CPU + GPU", "Due schede con i dati principali.",
             TextButton("Crea", () => Add("cpugpu"))));
+        _content.Children.Add(Card("\uE945", "Solo AI", "Saldo DeepSeek, spesa API e token di ChatGPT e Claude, con grafici.",
+            TextButton("Crea", () => Add("ai"))));
     }
 
     void BuildAppPage()
     {
         PageHeader("Impostazioni app", "Comportamento generale di HW Widget su questo PC.");
+
+        var keys = AiKeys.Load();
+        SubTitle("AI e chiavi API");
+        _content.Children.Add(CardFull("\uE945", "Questa sezione",
+            "DeepSeek → saldo API · OpenAI/Anthropic → spesa API (servono chiavi con permessi di fatturazione/amministratore) · " +
+            "token totali di ChatGPT e Claude → letti dai log locali delle rispettive CLI, senza chiavi. " +
+            "I limiti di reset degli abbonamenti (ChatGPT/Claude) non sono esposti da nessuna API pubblica.",
+            new TextBlock { Text = "", Width = 0 }));
+        (FrameworkElement deepSeekRow, PasswordBox deepSeek) = KeyRow("DeepSeek API key", keys.DeepSeek);
+        (FrameworkElement openAiRow, PasswordBox openAi) = KeyRow("OpenAI admin key", keys.OpenAi);
+        (FrameworkElement anthropicRow, PasswordBox anthropic) = KeyRow("Anthropic admin key", keys.Anthropic);
+        (FrameworkElement githubRow, PasswordBox github) = KeyRow("Token GitHub (aggiornamenti, repo privata)", keys.GitHub);
+        var interval = Combo(new[] { "5", "15", "60", "180" },
+            new[] { "5 minuti", "15 minuti", "1 ora", "3 ore" },
+            () => keys.RefreshMinutes.ToString(),
+            v => { keys.RefreshMinutes = int.Parse(v); keys.Save(); });
+        var saveRow = new WrapPanel();
+        saveRow.Children.Add(TextButton("Salva chiavi", () =>
+        {
+            keys.DeepSeek = deepSeek.Password.Trim();
+            keys.OpenAi = openAi.Password.Trim();
+            keys.Anthropic = anthropic.Password.Trim();
+            keys.GitHub = github.Password.Trim();
+            keys.Save();
+            _ = SensorHub.RefreshAiAsync();
+            Rebuild();
+        }, accent: true));
+        saveRow.Children.Add(TextButton("Rileggi ora", () => _ = SensorHub.RefreshAiAsync()));
+        _content.Children.Add(Card("\uE72C", "Chiavi", "Salvate cifrate (DPAPI) in " + Path.Combine(WidgetConfig.Dir, "keys.dat"),
+            NewColumn(deepSeekRow, openAiRow, anthropicRow, githubRow, interval, saveRow)));
+
+        SubTitle("Aggiornamenti");
+        var updateInfo = new TextBlock
+        {
+            Text = $"Versione installata: {Updater.CurrentText}",
+            Style = (Style)Resources["HubCardDesc"],
+            Margin = new Thickness(0, 0, 0, 8),
+        };
+        var updateRow = new WrapPanel();
+        updateRow.Children.Add(TextButton("Controlla aggiornamenti", () => _ = CheckUpdates(updateInfo)));
+        updateRow.Children.Add(new CheckBox
+        {
+            Content = "Controlla all'avvio",
+            IsChecked = keys.CheckUpdatesOnStartup,
+            Style = (Style)Resources["HubToggle"],
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0),
+        });
+        if (updateRow.Children[1] is CheckBox startupBox)
+            startupBox.Click += (_, _) => { keys.CheckUpdatesOnStartup = startupBox.IsChecked == true; keys.Save(); };
+        _content.Children.Add(CardFull("\uE895", "Aggiornamento automatico",
+            "Legge l'ultima release della repo privata con il token GitHub qui sopra, scarica l'installer e aggiorna.",
+            NewColumn(updateInfo, updateRow)));
 
         SubTitle("Avvio e accesso");
         _content.Children.Add(Card("\uE7E8", "Avvia con Windows", "Il widget parte da solo all'accesso.",
@@ -356,6 +413,14 @@ sealed class ControlHub : Window
             ("\uEDA2", "Disco", Switch(() => c.ShowDisk, v => { c.ShowDisk = v; Apply(w, true); })),
             ("\uE9D2", "Metriche secondarie", Switch(() => c.ShowSecondary, v => { c.ShowSecondary = v; Apply(w, true); })),
             ("\uE8A7", "Titolo “HW Widget” nel pannello", Switch(() => c.ShowTitle, v => { c.ShowTitle = v; Apply(w, true); }))));
+        _content.Children.Add(Expander("\uE945", "Sezione AI", "DeepSeek, ChatGPT e Claude: saldo, spesa API e token.",
+            ("\uE945", "Mostra la sezione AI", Switch(() => c.ShowAi, v => { c.ShowAi = v; Apply(w, true); })),
+            ("\uE9D9", "DeepSeek (saldo API)", Switch(() => c.AiProviders.Contains("deepseek"),
+                v => { ToggleProvider(c, "deepseek", v); Apply(w, true); })),
+            ("\uE9D9", "ChatGPT (spesa API + token dei log)", Switch(() => c.AiProviders.Contains("openai"),
+                v => { ToggleProvider(c, "openai", v); Apply(w, true); })),
+            ("\uE9D9", "Claude (spesa API + token dei log)", Switch(() => c.AiProviders.Contains("anthropic"),
+                v => { ToggleProvider(c, "anthropic", v); Apply(w, true); }))));
         _content.Children.Add(Expander("\uE8CB", "Ordine degli elementi", "Sposta le sezioni su e giù (primo = in alto).",
             OrderRows(w).ToArray()));
 
@@ -457,6 +522,83 @@ sealed class ControlHub : Window
             Padding = new Thickness(16, 10, 16, 10),
             Child = grid,
         };
+    }
+
+    /// <summary>Card con il contenuto sotto il titolo (per chiavi e form).</summary>
+    FrameworkElement CardFull(string glyph, string title, string description, FrameworkElement content)
+    {
+        var stack = new StackPanel();
+        var head = new StackPanel { Orientation = Orientation.Horizontal };
+        head.Children.Add(new TextBlock { Text = glyph, Style = (Style)Resources["HubGlyph"] });
+        var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        texts.Children.Add(new TextBlock { Text = title, Style = (Style)Resources["HubCardTitle"] });
+        if (description.Length > 0)
+            texts.Children.Add(new TextBlock { Text = description, Style = (Style)Resources["HubCardDesc"] });
+        head.Children.Add(texts);
+        stack.Children.Add(head);
+        content.Margin = new Thickness(22, 10, 0, 0);
+        stack.Children.Add(content);
+        return new Border
+        {
+            Style = (Style)Resources["HubCard"],
+            Padding = new Thickness(16, 12, 16, 14),
+            Child = stack,
+        };
+    }
+
+    static FrameworkElement NewColumn(params UIElement[] items)
+    {
+        var sp = new StackPanel();
+        foreach (var i in items) sp.Children.Add(i);
+        return sp;
+    }
+
+    (FrameworkElement Row, PasswordBox Box) KeyRow(string label, string value)
+    {
+        var box = new PasswordBox
+        {
+            Password = value,
+            Width = 320,
+            Style = (Style)Resources["HubPassword"],
+            Margin = new Thickness(0, 0, 12, 6),
+        };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+        row.Children.Add(new TextBlock
+        {
+            Text = label,
+            Width = 260,
+            VerticalAlignment = VerticalAlignment.Center,
+            Style = (Style)Resources["HubCardDesc"],
+        });
+        row.Children.Add(box);
+        return (row, box);
+    }
+
+    void ToggleProvider(WidgetConfig c, string provider, bool on)
+    {
+        if (on) { if (!c.AiProviders.Contains(provider)) c.AiProviders.Add(provider); }
+        else c.AiProviders.Remove(provider);
+    }
+
+    async Task CheckUpdates(TextBlock status)
+    {
+        var keys = AiKeys.Load();
+        status.Text = "Controllo in corso…";
+        var info = await Updater.CheckAsync(keys.GitHub);
+        if (info == null)
+        {
+            status.Text = keys.GitHub.Length == 0
+                ? "Serve un token GitHub per leggere le release della repo privata."
+                : $"Nessuna release trovata (versione installata {Updater.CurrentText}).";
+            return;
+        }
+        if (!Updater.IsNewer(info))
+        {
+            status.Text = $"Sei aggiornato: {Updater.CurrentText} (ultima release {info.Tag}).";
+            return;
+        }
+        status.Text = $"Nuova versione {info.Tag} disponibile.";
+        UpdateWindow.Start(info, keys.GitHub);
     }
 
     FrameworkElement Expander(string glyph, string title, string description,

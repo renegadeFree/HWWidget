@@ -155,6 +155,39 @@ static class SelfTest
 
             Say("config-dir", WidgetConfig.Dir);
 
+            // --- AI: parser e log locali ---
+            var (dsValue, dsCurrency) = AiUsage.ParseDeepSeekBalance(
+                """{"is_available":true,"balance_infos":[{"currency":"USD","total_balance":"12.34","granted_balance":"0.00","topped_up_balance":"12.34"}]}""");
+            Check(dsValue is > 12.3 and < 12.4 && dsCurrency == "USD", "saldo DeepSeek non letto");
+            Say("ai-deepseek", $"saldo={dsValue:0.00} {dsCurrency}");
+
+            var openai = AiUsage.ParseDailyAmounts(
+                """{"object":"page","data":[{"start_time":1757800000,"results":[{"amount":{"value":1.50,"currency":"usd"}}]},{"start_time":1757900000,"results":[{"amount":{"value":2.25,"currency":"usd"}}]}]}""");
+            Check(Math.Abs(openai.Values.Sum() - 3.75) < 0.001, "spesa OpenAI non sommata");
+            var anthropic = AiUsage.ParseDailyAmounts(
+                """{"data":[{"starting_at":"2026-09-13T00:00:00Z","results":[{"amount":"4.10","currency":"USD"}]},{"starting_at":"2026-09-14T00:00:00Z","results":[{"amount":"1.90","currency":"USD"}]}]}""");
+            Check(Math.Abs(anthropic.Values.Sum() - 6.00) < 0.001, "spesa Anthropic non sommata");
+            Say("ai-spese", $"OpenAI {openai.Values.Sum():0.00} $ · Anthropic {anthropic.Values.Sum():0.00} $ (da JSON di esempio)");
+
+            var (codexTokens, codexWeek) = CodexLogs.SumTokens();
+            var (claudeTokens, _) = ClaudeLogs.SumTokens();
+            Say("ai-token", $"log locali: Codex {AiUsage.Tokens(codexTokens)} (7g {AiUsage.Tokens(codexWeek)}) · Claude {AiUsage.Tokens(claudeTokens)}");
+
+            // --- aggiornamenti: confronto versioni ---
+            Check(new UpdateInfo { Version = new Version(1, 0, 1) }.Version > Updater.Current, "confronto versioni errato");
+            Check(Updater.CurrentText == "1.0.0", $"versione applicazione inattesa: {Updater.CurrentText}");
+            Check(AiUsage.Tokens(254976079).EndsWith("M"), "formattazione token errata");
+            Say("update", $"versione corrente {Updater.CurrentText} · repo {Updater.Repo}");
+            var ghKeys = AiKeys.Load();
+            if (ghKeys.GitHub.Length > 0)
+            {
+                var release = Updater.CheckAsync(ghKeys.GitHub).GetAwaiter().GetResult();
+                if (release == null) Say("update-check", "nessuna release leggibile (token o repo?)");
+                else Say("update-check", $"ultima release {release.Tag} ({release.AssetName}, {release.Size / 1048576.0:0} MB) · " +
+                                         $"aggiornamento disponibile: {(Updater.IsNewer(release) ? "sì" : "no")}");
+            }
+            else Say("update-check", "nessun token GitHub salvato: controllo aggiornamenti non testato");
+
             // autostart: same registry value the menus write
             const string runKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
             using (var k = Registry.CurrentUser.OpenSubKey(runKey, true))

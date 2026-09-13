@@ -5,6 +5,7 @@ using System.Linq;
 using System.Management;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using System.Windows.Threading;
 
 namespace HWWidget;
@@ -563,6 +564,10 @@ internal static class SensorHub
     static DispatcherTimer? _timer;
     static DispatcherTimer? _slow;
     static readonly Dictionary<string, double> Requested = new();
+    static AiSnapshot _ai = new();
+    static DateTime _aiLast = DateTime.MinValue;
+    static DispatcherTimer? _aiTimer;
+    static bool _aiBusy;
 
     public static Metrics Current { get; private set; } = new();
     public static event Action<Metrics>? Tick;
@@ -573,10 +578,45 @@ internal static class SensorHub
         Cpu.LoadStatic();
         Ram.LoadStatic();
         Ram.Sample();
-        Disk.Open();
+            Disk.Open();
         Gpu.Open(0);
+        StartAiRefresh();
         Sample();
         SetInterval("__start", intervalSeconds);
+    }
+
+    /// <summary>Le API AI si aggiornano molto più lentamente del resto (default 15 min)
+    /// e la chiamata HTTP resta fuori dal thread dell'interfaccia.</summary>
+    static void StartAiRefresh()
+    {
+        if (_aiTimer != null) return;
+        _aiTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        _aiTimer.Tick += (_, _) =>
+        {
+            int minutes = Math.Max(1, AiKeys.Load().RefreshMinutes);
+            if ((DateTime.UtcNow - _aiLast).TotalMinutes < minutes) return;
+            _ = RefreshAiAsync();
+        };
+        _aiTimer.Start();
+        _ = RefreshAiAsync();
+    }
+
+    public static async Task RefreshAiAsync()
+    {
+        if (_aiBusy) return;
+        _aiBusy = true;
+        try
+        {
+            var keys = AiKeys.Load();
+            _ai = await Task.Run(() => AiUsage.FetchAsync(keys));
+        }
+        catch { }
+        finally
+        {
+            _aiBusy = false;
+            _aiLast = DateTime.UtcNow;
+            Sample();
+        }
     }
 
     public static void SetInterval(string widgetId, double seconds)
@@ -641,6 +681,7 @@ internal static class SensorHub
             DiskOk = Disk.Available,
             DiskRead = Disk.ReadBps,
             DiskWrite = Disk.WriteBps,
+            Ai = _ai,
         };
         Current = m;
         Tick?.Invoke(m);

@@ -36,6 +36,9 @@ internal sealed class WidgetConfig
     public bool ShowGpu { get; set; } = true;
     public bool ShowRam { get; set; } = true;
     public bool ShowDisk { get; set; } = true;
+    /// <summary>Sezione AI (DeepSeek / ChatGPT / Claude).</summary>
+    public bool ShowAi { get; set; }
+    public List<string> AiProviders { get; set; } = new() { "deepseek", "openai", "anthropic" };
     public bool ShowSecondary { get; set; } = true;
     /// <summary>"⚡ HW Widget" heading inside the panel layout.</summary>
     public bool ShowTitle { get; set; }
@@ -99,6 +102,7 @@ internal sealed class WidgetConfig
             if (ShowGpu) visible.Add("gpu");
             if (ShowRam) visible.Add("ram");
             if (ShowDisk) visible.Add("disk");
+            if (ShowAi) visible.Add("ai");
 
             if (Order.Count == 0) return visible;
             var ordered = Order.Where(visible.Contains).ToList();
@@ -217,10 +221,12 @@ internal sealed class WidgetConfig
         foreach (var key in Colors.Keys.ToList())
             if (!IsValidColor(Colors[key])) Colors.Remove(key);
         Order ??= new List<string>();
-        Order = Order.Where(k => k is "net" or "cpu" or "gpu" or "ram" or "disk")
+        Order = Order.Where(k => k is "net" or "cpu" or "gpu" or "ram" or "disk" or "ai")
                      .Distinct()
                      .ToList();
-        if (!ShowNet && !ShowCpu && !ShowGpu && !ShowRam && !ShowDisk) ShowCpu = true;
+        AiProviders ??= new List<string>();
+        AiProviders = AiProviders.Where(p => p is "deepseek" or "openai" or "anthropic").Distinct().ToList();
+        if (!ShowNet && !ShowCpu && !ShowGpu && !ShowRam && !ShowDisk && !ShowAi) ShowCpu = true;
         Schema = 1;
         return this;
     }

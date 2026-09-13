@@ -28,6 +28,7 @@ internal sealed class Metrics
     public string RamSpeed = "";
     public bool DiskOk;
     public double DiskRead, DiskWrite;
+    public AiSnapshot Ai = new();
 }
 
 /// <summary>Builds the widget content for the three layouts and binds a sample to it.
@@ -192,6 +193,7 @@ internal sealed class WidgetView
         "cpu" => "CPU",
         "gpu" => "GPU",
         "disk" => "DISCO",
+        "ai" => "AI",
         _ => "RAM",
     };
     static string ElGlyph(string el) => el switch
@@ -200,6 +202,7 @@ internal sealed class WidgetView
         "cpu" => "\uE950",
         "gpu" => "\uE7FC",
         "disk" => "\uEDA2",
+        "ai" => "\uE945",
         _ => "\uE964",
     };
 
@@ -469,6 +472,10 @@ internal sealed class WidgetView
                     ("Lettura", m => Rate(m.DiskRead), new SolidColorBrush(_p.NetDown), m => m.DiskRead),
                     ("Scrittura", m => Rate(m.DiskWrite), new SolidColorBrush(_p.Watt), m => m.DiskWrite)));
                 break;
+            case "ai":
+                foreach (var row in AiRows(graphs))
+                    body.Children.Add(row);
+                break;
             default:
                 body.Children.Add(PairRow(el, graphs,
                     ("Upload", m => Rate(m.NetUp), new SolidColorBrush(_p.NetUp), m => m.NetUp),
@@ -479,6 +486,77 @@ internal sealed class WidgetView
         card.Child = body;
         section.Children.Add(card);
         return section;
+    }
+
+    /// <summary>Righe AI: saldo DeepSeek, spesa API e token per ChatGPT/Claude.</summary>
+    IEnumerable<FrameworkElement> AiRows(bool graphs)
+    {
+        var providers = _c.AiProviders.Count > 0 ? _c.AiProviders : new List<string> { "deepseek", "openai", "anthropic" };
+        var rows = new List<FrameworkElement>();
+
+        if (providers.Contains("deepseek"))
+        {
+            rows.Add(AiRow("ai.deepseek", "DeepSeek", graphs,
+                m => m.Ai.DeepSeekBalance.Length > 0 ? m.Ai.DeepSeekBalance : "n/d",
+                m => m.Ai.DeepSeekValue, _p.Ok));
+        }
+        if (providers.Contains("openai"))
+        {
+            rows.Add(AiRow("ai.openai.week", "ChatGPT 7 g", graphs,
+                m => m.Ai.OpenAiWeek.Length > 0 ? m.Ai.OpenAiWeek : "n/d",
+                m => m.Ai.OpenAiWeekValue, _p.NetDown));
+            rows.Add(AiRow("ai.openai.month", "ChatGPT mese", graphs,
+                m => m.Ai.OpenAiMonth.Length > 0 ? m.Ai.OpenAiMonth : "n/d",
+                null, _p.NetDown));
+            rows.Add(AiRow("ai.codex.tokens", "Token ChatGPT", graphs,
+                m => m.Ai.CodexTokens.Length > 0 ? m.Ai.CodexTokens : "n/d",
+                null, _p.Cpu));
+        }
+        if (providers.Contains("anthropic"))
+        {
+            rows.Add(AiRow("ai.anthropic.week", "Claude 7 g", graphs,
+                m => m.Ai.AnthropicWeek.Length > 0 ? m.Ai.AnthropicWeek : "n/d",
+                m => m.Ai.AnthropicWeekValue, _p.Watt));
+            rows.Add(AiRow("ai.anthropic.month", "Claude mese", graphs,
+                m => m.Ai.AnthropicMonth.Length > 0 ? m.Ai.AnthropicMonth : "n/d",
+                null, _p.Watt));
+            rows.Add(AiRow("ai.claude.tokens", "Token Claude", graphs,
+                m => m.Ai.ClaudeTokens.Length > 0 ? m.Ai.ClaudeTokens : "n/d",
+                null, _p.Ram));
+        }
+        for (int i = 0; i < rows.Count; i++)
+            if (rows[i] is FrameworkElement fe) fe.Margin = new Thickness(0, 0, 0, i == rows.Count - 1 ? 0 : 9 * _u);
+        return rows;
+    }
+
+    FrameworkElement AiRow(string key, string label, bool graphs, Func<Metrics, string> text,
+                           Func<Metrics, double>? graphValue, Color color)
+    {
+        var inner = new StackPanel();
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var lab = Txt(label, 11.5 * _u, new SolidColorBrush(_p.TextDim));
+        lab.VerticalAlignment = VerticalAlignment.Center;
+        var val = Txt("—", 12.5 * _u, new SolidColorBrush(color), bold: true, mono: true, align: TextAlignment.Right);
+        Grid.SetColumn(val, 1);
+        grid.Children.Add(lab);
+        grid.Children.Add(val);
+        inner.Children.Add(grid);
+
+        Sparkline? graph = null;
+        if (graphValue != null && graphs)
+        {
+            graph = Graph($"panel.{key}", new SolidColorBrush(color), Brushes.Transparent, 0, 20 * _u * _c.GraphHeightScale);
+            graph.Margin = new Thickness(0, 5 * _u, 0, 0);
+            inner.Children.Add(graph);
+        }
+        _binds.Add(m =>
+        {
+            val.Text = text(m);
+            if (graphValue != null) graph?.Push(graphValue(m));
+        });
+        return inner;
     }
 
     /// <summary>Colour of a meter: the fixed per-element colour when set, otherwise the

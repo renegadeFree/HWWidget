@@ -24,6 +24,12 @@ static class Program
             return;
         }
 
+        if (args.Contains("--update"))
+        {
+            Installer.Update();
+            return;
+        }
+
         var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
         app.Run(new SetupWindow());
     }

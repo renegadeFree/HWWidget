@@ -352,6 +352,41 @@ static class HubTheme
       </Setter.Value>
     </Setter>
   </Style>
+
+  <Style x:Key="HubPassword" TargetType="PasswordBox">
+    <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+    <Setter Property="Background" Value="{StaticResource ControlFill}" />
+    <Setter Property="BorderBrush" Value="{StaticResource CardStroke}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="7,4" />
+    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="CaretBrush" Value="{StaticResource TextPrimary}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="PasswordBox">
+          <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="1" CornerRadius="4" Padding="{TemplateBinding Padding}">
+            <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{StaticResource ControlFillHover}" />
+            </Trigger>
+            <Trigger Property="IsFocused" Value="True">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="HubProgress" TargetType="ProgressBar">
+    <Setter Property="Height" Value="6" />
+    <Setter Property="Foreground" Value="{StaticResource Accent}" />
+    <Setter Property="Background" Value="{StaticResource TrackOff}" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
 </ResourceDictionary>
 """;
 }

@@ -25,6 +25,10 @@ e un hub di controllo in stile Impostazioni di Windows.
   più inserimento manuale di numeri e colori e riordino delle sezioni.
 - **Tray**: doppio clic = hub, clic singolo = mostra/nascondi, tasto destro = menu.
 - **Avvio con Windows**, icona dell'app e installer standalone.
+- **Sezione AI**: saldo DeepSeek, spesa API di OpenAI/Anthropic (chiavi salvate con DPAPI)
+  e token totali di ChatGPT/Claude letti dai log locali delle CLI. Widget dedicato con i
+  provider che scegli tu.
+- **Aggiornamento automatico** dalle release GitHub: controlla, chiede, scarica e riavvia.
 
 ## Struttura
 

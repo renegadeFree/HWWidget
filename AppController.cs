@@ -8,6 +8,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.Threading.Tasks;
 using Microsoft.Win32;
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
@@ -48,6 +49,21 @@ sealed class AppController : IDisposable
         _tray = new TrayIcon(this);
         RegisterHotkey();
         SensorHub.Start(_windows.Count > 0 ? _windows[0].IntervalSeconds : 1);
+        CheckUpdatesOnStartup();
+    }
+
+    /// <summary>Controllo aggiornamenti all'avvio: silenzioso se non c'è nulla di nuovo.</summary>
+    async void CheckUpdatesOnStartup()
+    {
+        try
+        {
+            var keys = AiKeys.Load();
+            if (!keys.CheckUpdatesOnStartup || keys.GitHub.Length == 0) return;
+            await Task.Delay(8000);                       // lascia respirare l'avvio
+            var info = await Updater.CheckAsync(keys.GitHub);
+            if (info != null && Updater.IsNewer(info)) UpdateWindow.Start(info, keys.GitHub);
+        }
+        catch { }
     }
 
     MainWindow Open(WidgetConfig cfg)
@@ -71,6 +87,11 @@ sealed class AppController : IDisposable
             case "ram": c.ShowNet = false; c.ShowCpu = false; c.ShowGpu = false; c.Layout = "tiles"; break;
             case "net": c.ShowCpu = false; c.ShowGpu = false; c.ShowRam = false; break;
             case "cpugpu": c.ShowNet = false; c.ShowRam = false; c.Layout = "cards"; break;
+            case "ai":
+                c.ShowNet = c.ShowCpu = c.ShowGpu = c.ShowRam = c.ShowDisk = false;
+                c.ShowAi = true;
+                c.Layout = "panelgraph";
+                break;
         }
         c.Sanitized().Save();
         Open(c);
