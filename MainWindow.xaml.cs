@@ -165,6 +165,7 @@ public partial class MainWindow : Window
             Native.SetWindowPos(_hwnd, IntPtr.Zero, wa.Right - (r.R - r.L) - 24, wa.Top + 24, 0, 0,
                 Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
             SavePosition();
+            GrowIfContentClipped();
             return;
         }
 
@@ -181,6 +182,18 @@ public partial class MainWindow : Window
         int y = (int)Math.Clamp(wa2.Y + _c.OffY, wa2.Y, Math.Max(wa2.Y, wa2.Y + wa2.Height - ph));
         Native.SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0,
             Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
+        GrowIfContentClipped();
+    }
+
+    /// <summary>All'avvio, se il contenuto non entra nell'altezza salvata (capita dopo un
+    /// aggiornamento che cambia spaziature o righe) il widget cresce quanto serve: un
+    /// monitor tagliato non serve a nessuno. Ridimensionamenti manuali non vengono toccati.</summary>
+    void GrowIfContentClipped()
+    {
+        double needed = FitHeight();
+        if (needed <= Height + 2) return;
+        Height = needed;
+        SavePosition();
     }
 
     void SavePosition()
