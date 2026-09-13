@@ -39,6 +39,9 @@ internal sealed class WidgetConfig
     /// <summary>Sezione AI (DeepSeek / ChatGPT / Claude).</summary>
     public bool ShowAi { get; set; }
     public List<string> AiProviders { get; set; } = new() { "deepseek", "openai", "anthropic" };
+    /// <summary>Budget mensile per fornitore AI in USD (0 = non impostato). Serve al widget
+    /// per calcolare il budget rimasto: le API non espongono un limite di spesa.</summary>
+    public Dictionary<string, double> AiBudgets { get; set; } = new();
     public bool ShowSecondary { get; set; } = true;
     /// <summary>"⚡ HW Widget" heading inside the panel layout.</summary>
     public bool ShowTitle { get; set; }
@@ -226,6 +229,11 @@ internal sealed class WidgetConfig
                      .ToList();
         AiProviders ??= new List<string>();
         AiProviders = AiProviders.Where(p => p is "deepseek" or "openai" or "anthropic").Distinct().ToList();
+        AiBudgets ??= new Dictionary<string, double>();
+        foreach (var p in AiBudgets.Keys.ToList())
+            if (p is not ("deepseek" or "openai" or "anthropic")
+                || double.IsNaN(AiBudgets[p]) || AiBudgets[p] < 0 || AiBudgets[p] > 1e6)
+                AiBudgets.Remove(p);
         if (!ShowNet && !ShowCpu && !ShowGpu && !ShowRam && !ShowDisk && !ShowAi) ShowCpu = true;
         Schema = 1;
         return this;
@@ -237,6 +245,10 @@ internal sealed class WidgetConfig
     /// <summary>"auto" or a fixed #RRGGBB for the given element.</summary>
     public string ColorOf(string element)
         => Colors.TryGetValue(element, out var v) && v != "auto" ? v : "auto";
+
+    /// <summary>Budget mensile impostato per il fornitore (0 = non impostato).</summary>
+    public double AiBudget(string provider)
+        => AiBudgets.TryGetValue(provider, out var v) && v > 0 ? v : 0;
 
     /// <summary>Carry an old settings.json forward. The opaque panel came from a broken
     /// "500% opacity" value written by the previous build, so legacy files get the new

@@ -88,8 +88,8 @@ static class Updater
         return path;
     }
 
-    /// <summary>Lancia l'installer in modalità aggiornamento e chiude l'app.</summary>
-    public static void RunInstaller(string setupPath)
+    /// <summary>Lancia l'installer in modalità aggiornamento e (se c'è) chiude l'app.</summary>
+    public static void RunInstaller(string setupPath, bool exitApp = true)
     {
         Process.Start(new ProcessStartInfo
         {
@@ -97,6 +97,37 @@ static class Updater
             Arguments = "--update",
             UseShellExecute = true,
         });
-        AppController.Current.ExitAll();
+        if (exitApp) AppController.Current?.ExitAll();
+    }
+
+    /// <summary>Controlla, scarica e installa senza interfaccia: usato per verificare il
+    /// giro completo "nuova release → programma installato aggiornato" e per gli
+    /// aggiornamenti silenziosi.</summary>
+    public static string SilentUpdate(string logPath)
+    {
+        void Log(string msg)
+        {
+            try { File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss}] {msg}\r\n"); } catch { }
+        }
+        try
+        {
+            Log($"versione installata {CurrentText}");
+            var keys = AiKeys.Load();
+            if (keys.GitHub.Length == 0) { Log("nessun token GitHub salvato"); return "no-token"; }
+            var info = CheckAsync(keys.GitHub).GetAwaiter().GetResult();
+            if (info == null) { Log("nessuna release leggibile"); return "no-release"; }
+            Log($"release trovata {info.Tag} · {info.AssetName} ({info.Size / 1048576.0:0} MB)");
+            if (!IsNewer(info)) { Log("sei aggiornato"); return "updated"; }
+            string path = DownloadAsync(info, keys.GitHub, null).GetAwaiter().GetResult();
+            Log($"scaricato {new FileInfo(path).Length / 1048576.0:0.0} MB in {path}");
+            RunInstaller(path, exitApp: false);
+            Log("installer avviato");
+            return "installing";
+        }
+        catch (Exception ex)
+        {
+            Log("FALLITO: " + ex.Message);
+            return "error";
+        }
     }
 }

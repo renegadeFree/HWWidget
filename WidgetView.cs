@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -97,41 +98,9 @@ internal sealed class WidgetView
     {
         "net" => 2 + (c.ShowSecondary ? 1 : 0),
         "gpu" => 2 + (c.ShowSecondary ? 1 : 0),
+        "ai" => Math.Max(1, c.AiProviders.Count) * 4,
         _ => 1 + (c.ShowSecondary ? 1 : 0),
     };
-
-    /// <summary>Panel layout height, so the window can fit the content.</summary>
-    public static double EstimateHeight(WidgetConfig c, double widthDip)
-    {
-        double ts = c.TextScale * c.UiScale;
-        double rs = c.RowScale * c.UiScale;
-        double u = PanelUnit(c, widthDip);
-        int n = Math.Max(1, c.Elements.Count());
-        return c.Layout switch
-        {
-            "cards" => 26 + c.Elements.Sum(el => 24 + 22 * ts + LineCount(c, el) * 34 * rs),
-            "tiles" => 26 + ((n + 1) / 2) * (112 * ts + 34 * rs),
-            "panel" or "panelgraph" => 20 + PanelTitleHeight(u)
-                + c.Elements.Sum(el => PanelSectionHeight(el, u, c.Layout == "panelgraph")),
-            _ => 26 + n * (30 * rs + 2 * ts),
-        };
-    }
-
-    static double PanelTitleHeight(double u) => 29 * u;
-
-    static double PanelSectionHeight(string el, double u, bool graphs)
-    {
-        double header = 30 * u;                                    // header bar + section margin
-        double metric = 55 * u + (graphs ? 24 * u : 0);            // label/value + bar (+ graph)
-        double pair = 61 * u;                                      // two-column card
-        return header + el switch
-        {
-            "cpu" => metric,
-            "gpu" => metric * 3,
-            "ram" => metric,
-            _ => pair,
-        };
-    }
 
     // ---------- shared bits ----------
 
@@ -260,6 +229,17 @@ internal sealed class WidgetView
                 lines.Add(($"S {Rate(m.DiskWrite)}", m.DiskWrite, "write", new SolidColorBrush(_p.Watt), "bps"));
                 return (Rate(m.DiskRead), $"S {Rate(m.DiskWrite)}", 0, lines);
             }
+            case "ai":
+            {
+                // budget rimasto, budget consumato e token totali del primo fornitore attivo:
+                // la sezione AI non ha grafici, qui serve solo un riassunto testuale
+                string p = _c.AiProviders.FirstOrDefault() ?? "deepseek";
+                string rimasto = AiRemaining(p, m);
+                lines.Add(($"Rimasto {rimasto}", 0, "", new SolidColorBrush(_p.Ok), ""));
+                lines.Add(($"Consumato {AiSpent(p, m)}", 0, "", new SolidColorBrush(_p.NetDown), ""));
+                lines.Add(($"Token {AiTokens(p, m)}", 0, "", new SolidColorBrush(_p.Cpu), ""));
+                return (rimasto, $"Token {AiTokens(p, m)}", 0, lines);
+            }
         }
     }
 
@@ -280,16 +260,20 @@ internal sealed class WidgetView
             label.Margin = new Thickness(0, 0, 10, 0);
             var value = Txt("—", 12.5 * _ts, new SolidColorBrush(_p.Text), mono: true);
             value.VerticalAlignment = VerticalAlignment.Center;
-            var graph = Graph($"rows.{el}.main", new SolidColorBrush(_p.Text), Brushes.Transparent, 100, Math.Max(8, (30 * _rs) - 4) * _c.GraphHeightScale);
-            graph.VerticalAlignment = VerticalAlignment.Center;
-            graph.Margin = new Thickness(8, 0, 0, 0);
+            // la sezione AI è solo testo: niente grafico
+            var graph = el == "ai" ? null : Graph($"rows.{el}.main", new SolidColorBrush(_p.Text), Brushes.Transparent, 100,
+                                                  Math.Max(8, (30 * _rs) - 4) * _c.GraphHeightScale);
+            if (graph != null)
+            {
+                graph.VerticalAlignment = VerticalAlignment.Center;
+                graph.Margin = new Thickness(8, 0, 0, 0);
+            }
 
             Grid.SetColumn(label, 0);
             Grid.SetColumn(value, 1);
-            Grid.SetColumn(graph, 2);
             grid.Children.Add(label);
             grid.Children.Add(value);
-            grid.Children.Add(graph);
+            if (graph != null) { Grid.SetColumn(graph, 2); grid.Children.Add(graph); }
             stack.Children.Add(grid);
 
             _binds.Add(m =>
@@ -300,9 +284,11 @@ internal sealed class WidgetView
                     "net" => $"{d.lines[0].text}  {d.lines[1].text}",
                     "cpu" => d.sub.Length > 0 ? $"{d.main} · {d.sub}" : d.main,
                     "gpu" => d.sub.Length > 0 ? $"{d.main} · {d.sub}" : d.main,
+                    "ai" => d.sub.Length > 0 ? $"{d.main} · {d.sub}" : d.main,
                     _ => d.sub.Length > 0 ? $"{d.sub}" : d.main,
                 };
                 var primary = d.lines[0];
+                if (graph == null) return;
                 graph.StrokeA = primary.color;
                 graph.StrokeB = el == "net" && d.lines.Count > 1 ? d.lines[1].color : Brushes.Transparent;
                 if (el == "net") graph.Push(m.NetDown, m.NetUp);
@@ -324,7 +310,7 @@ internal sealed class WidgetView
             title.Margin = new Thickness(0, 0, 2, 2);
             inner.Children.Add(title);
 
-            var rows = new List<(Sparkline graph, int key)>();
+            var rows = new List<(Sparkline? graph, int key)>();
             var texts = new List<TextBlock>();
             var defs = Data(el, new Metrics { GpuOk = true, GpuUtil = 1, CpuUsage = 1, RamPct = 1, NetDown = 1 });
 
@@ -337,15 +323,17 @@ internal sealed class WidgetView
                 var val = Txt("—", 20 * _ts, new SolidColorBrush(_p.Text), mono: true, align: TextAlignment.Left);
                 val.VerticalAlignment = VerticalAlignment.Center;
                 val.MinWidth = 96 * _ts;
-            var sp = Graph($"cards.{el}.{i}", new SolidColorBrush(_p.Text), Brushes.Transparent, 100,
-                               26 * _rs * _c.GraphHeightScale);
-                sp.VerticalAlignment = VerticalAlignment.Center;
-                sp.Margin = new Thickness(10, 0, 0, 0);
+                var sp = el == "ai" ? null : Graph($"cards.{el}.{i}", new SolidColorBrush(_p.Text), Brushes.Transparent, 100,
+                                                   26 * _rs * _c.GraphHeightScale);
+                if (sp != null)
+                {
+                    sp.VerticalAlignment = VerticalAlignment.Center;
+                    sp.Margin = new Thickness(10, 0, 0, 0);
+                }
 
                 Grid.SetColumn(val, 0);
-                Grid.SetColumn(sp, 1);
                 g.Children.Add(val);
-                g.Children.Add(sp);
+                if (sp != null) { Grid.SetColumn(sp, 1); g.Children.Add(sp); }
                 inner.Children.Add(g);
 
                 int idx = i;
@@ -364,6 +352,7 @@ internal sealed class WidgetView
                 {
                     texts[i].Text = d.lines[i].text;
                     var (sp, _) = rows[i];
+                    if (sp == null) continue;
                     sp.StrokeA = d.lines[i].color;
                     if (el == "net" && i == 0 && d.lines.Count > 1)
                     {
@@ -433,7 +422,7 @@ internal sealed class WidgetView
 
     FrameworkElement PanelSection(string el, bool graphs)
     {
-        var section = new StackPanel { Margin = new Thickness(0, 0, 0, 8 * _u) };
+        var section = new StackPanel { Margin = new Thickness(0, 0, 0, 8 * _u * _rs) };
 
         // header: icon + name only, no box (as in the reference)
         var headerContent = new StackPanel { Orientation = Orientation.Horizontal };
@@ -447,7 +436,7 @@ internal sealed class WidgetView
             Margin = new Thickness(0, 0, 5 * _u, 0),
         });
         headerContent.Children.Add(Txt(ElName(el), 11.5 * _u, new SolidColorBrush(_p.Text), bold: true));
-        headerContent.Margin = new Thickness(2 * _u, 0, 0, 3 * _u);
+        headerContent.Margin = new Thickness(2 * _u, 0, 0, 3 * _u * _rs);
         section.Children.Add(headerContent);
 
         // one card per section: the metric rows sit one under the other inside it
@@ -473,7 +462,7 @@ internal sealed class WidgetView
                     ("Scrittura", m => Rate(m.DiskWrite), new SolidColorBrush(_p.Watt), m => m.DiskWrite)));
                 break;
             case "ai":
-                foreach (var row in AiRows(graphs))
+                foreach (var row in AiRows())
                     body.Children.Add(row);
                 break;
             default:
@@ -482,82 +471,80 @@ internal sealed class WidgetView
                     ("Download", m => Rate(m.NetDown), new SolidColorBrush(_p.NetDown), m => m.NetDown)));
                 break;
         }
-        var card = Surface(9 * _u, _p.Card, new Thickness(12 * _u, 9 * _u, 12 * _u, 10 * _u), new Thickness(0));
+        var card = Surface(9 * _u, _p.Card, new Thickness(12 * _u, 9 * _u * _rs, 12 * _u, 10 * _u * _rs), new Thickness(0));
         card.Child = body;
         section.Children.Add(card);
         return section;
     }
 
-    /// <summary>Righe AI: saldo DeepSeek, spesa API e token per ChatGPT/Claude.</summary>
-    IEnumerable<FrameworkElement> AiRows(bool graphs)
+    /// <summary>Sezione AI: senza grafici, solo budget rimasto, budget consumato e token
+    /// totali. Un fornitore disattivato non compare nel widget.</summary>
+    IEnumerable<FrameworkElement> AiRows()
     {
-        var providers = _c.AiProviders.Count > 0 ? _c.AiProviders : new List<string> { "deepseek", "openai", "anthropic" };
         var rows = new List<FrameworkElement>();
-
-        if (providers.Contains("deepseek"))
+        foreach (string p in _c.AiProviders)
         {
-            rows.Add(AiRow("ai.deepseek", "DeepSeek", graphs,
-                m => m.Ai.DeepSeekBalance.Length > 0 ? m.Ai.DeepSeekBalance : "n/d",
-                m => m.Ai.DeepSeekValue, _p.Ok));
+            string provider = p;
+            var (name, color) = provider switch
+            {
+                "openai" => ("ChatGPT", _p.NetDown),
+                "anthropic" => ("Claude", _p.Watt),
+                _ => ("DeepSeek", _p.Ok),
+            };
+            var header = Txt(name, 11.5 * _u, new SolidColorBrush(color), bold: true);
+            header.Margin = new Thickness(0, rows.Count == 0 ? 0 : 9 * _u * _rs, 0, 4 * _u * _rs);
+            rows.Add(header);
+            rows.Add(AiLine("Rimasto", m => AiRemaining(provider, m), color, false));
+            rows.Add(AiLine("Consumato", m => AiSpent(provider, m), color, false));
+            rows.Add(AiLine("Token totali", m => AiTokens(provider, m), color, true));
         }
-        if (providers.Contains("openai"))
-        {
-            rows.Add(AiRow("ai.openai.week", "ChatGPT 7 g", graphs,
-                m => m.Ai.OpenAiWeek.Length > 0 ? m.Ai.OpenAiWeek : "n/d",
-                m => m.Ai.OpenAiWeekValue, _p.NetDown));
-            rows.Add(AiRow("ai.openai.month", "ChatGPT mese", graphs,
-                m => m.Ai.OpenAiMonth.Length > 0 ? m.Ai.OpenAiMonth : "n/d",
-                null, _p.NetDown));
-            rows.Add(AiRow("ai.codex.tokens", "Token ChatGPT", graphs,
-                m => m.Ai.CodexTokens.Length > 0 ? m.Ai.CodexTokens : "n/d",
-                null, _p.Cpu));
-        }
-        if (providers.Contains("anthropic"))
-        {
-            rows.Add(AiRow("ai.anthropic.week", "Claude 7 g", graphs,
-                m => m.Ai.AnthropicWeek.Length > 0 ? m.Ai.AnthropicWeek : "n/d",
-                m => m.Ai.AnthropicWeekValue, _p.Watt));
-            rows.Add(AiRow("ai.anthropic.month", "Claude mese", graphs,
-                m => m.Ai.AnthropicMonth.Length > 0 ? m.Ai.AnthropicMonth : "n/d",
-                null, _p.Watt));
-            rows.Add(AiRow("ai.claude.tokens", "Token Claude", graphs,
-                m => m.Ai.ClaudeTokens.Length > 0 ? m.Ai.ClaudeTokens : "n/d",
-                null, _p.Ram));
-        }
-        for (int i = 0; i < rows.Count; i++)
-            if (rows[i] is FrameworkElement fe) fe.Margin = new Thickness(0, 0, 0, i == rows.Count - 1 ? 0 : 9 * _u);
+        if (rows.Count == 0)
+            rows.Add(Txt("Nessun fornitore attivo", 10.5 * _u, new SolidColorBrush(_p.TextDim)));
         return rows;
     }
 
-    FrameworkElement AiRow(string key, string label, bool graphs, Func<Metrics, string> text,
-                           Func<Metrics, double>? graphValue, Color color)
+    FrameworkElement AiLine(string label, Func<Metrics, string> text, Color color, bool last)
     {
-        var inner = new StackPanel();
-        var grid = new Grid();
+        var grid = new Grid { Margin = new Thickness(0, 0, 0, last ? 0 : 6 * _u * _rs) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var lab = Txt(label, 11.5 * _u, new SolidColorBrush(_p.TextDim));
+        var lab = Txt(label, 10.5 * _u, new SolidColorBrush(_p.TextDim));
         lab.VerticalAlignment = VerticalAlignment.Center;
-        var val = Txt("—", 12.5 * _u, new SolidColorBrush(color), bold: true, mono: true, align: TextAlignment.Right);
+        var val = Txt("—", 12 * _u, new SolidColorBrush(color), bold: true, mono: true, align: TextAlignment.Right);
         Grid.SetColumn(val, 1);
         grid.Children.Add(lab);
         grid.Children.Add(val);
-        inner.Children.Add(grid);
-
-        Sparkline? graph = null;
-        if (graphValue != null && graphs)
-        {
-            graph = Graph($"panel.{key}", new SolidColorBrush(color), Brushes.Transparent, 0, 20 * _u * _c.GraphHeightScale);
-            graph.Margin = new Thickness(0, 5 * _u, 0, 0);
-            inner.Children.Add(graph);
-        }
-        _binds.Add(m =>
-        {
-            val.Text = text(m);
-            if (graphValue != null) graph?.Push(graphValue(m));
-        });
-        return inner;
+        _binds.Add(m => val.Text = text(m));
+        return grid;
     }
+
+    /// <summary>Budget rimasto: saldo DeepSeek, oppure budget mensile meno spesa API.</summary>
+    string AiRemaining(string provider, Metrics m) => provider switch
+    {
+        "deepseek" => m.Ai.DeepSeekBalance.Length > 0 ? m.Ai.DeepSeekBalance : "n/d",
+        "openai" => Remaining(_c.AiBudget(provider), m.Ai.OpenAiMonthValue, m.Ai.OpenAiMonth),
+        _ => Remaining(_c.AiBudget(provider), m.Ai.AnthropicMonthValue, m.Ai.AnthropicMonth),
+    };
+
+    static string Remaining(double budget, double spent, string spentText)
+        => budget <= 0 || spentText.Length == 0 ? "n/d" : Money(Math.Max(0, budget - spent));
+
+    string AiSpent(string provider, Metrics m) => provider switch
+    {
+        "deepseek" => m.Ai.DeepSeekSpent.Length > 0 ? m.Ai.DeepSeekSpent : "n/d",
+        "openai" => m.Ai.OpenAiMonth.Length > 0 ? m.Ai.OpenAiMonth : "n/d",
+        _ => m.Ai.AnthropicMonth.Length > 0 ? m.Ai.AnthropicMonth : "n/d",
+    };
+
+    /// <summary>Token totali: dai log locali delle CLI (DeepSeek non li espone).</summary>
+    string AiTokens(string provider, Metrics m) => provider switch
+    {
+        "openai" => m.Ai.CodexTokens.Length > 0 ? m.Ai.CodexTokens : "n/d",
+        "anthropic" => m.Ai.ClaudeTokens.Length > 0 ? m.Ai.ClaudeTokens : "n/d",
+        _ => "n/d",
+    };
+
+    internal static string Money(double v) => v.ToString("0.00", CultureInfo.CurrentCulture) + " $";
 
     /// <summary>Colour of a meter: the fixed per-element colour when set, otherwise the
     /// threshold colours.</summary>
@@ -579,7 +566,7 @@ internal sealed class WidgetView
     FrameworkElement MetricRow(string key, string element, string label, Func<Metrics, string> text, Func<Metrics, double> pct,
                                Func<Metrics, double> graphValue, bool graphs, bool isTemp, bool isLast)
     {
-        var inner = new StackPanel { Margin = new Thickness(0, 0, 0, isLast ? 0 : 11 * _u) };
+        var inner = new StackPanel { Margin = new Thickness(0, 0, 0, isLast ? 0 : 11 * _u * _rs) };
 
         var top = new Grid();
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -594,19 +581,19 @@ internal sealed class WidgetView
 
         var track = new Border
         {
-            Height = 8.5 * _u,
-            CornerRadius = new CornerRadius(4.25 * _u),
+            Height = 8.5 * _u * _rs,
+            CornerRadius = new CornerRadius(4.25 * _u * _rs),
             Background = new SolidColorBrush(_p.Track),
         };
         var fill = new Border
         {
-            Height = 8.5 * _u,
+            Height = 8.5 * _u * _rs,
             Width = 0,
-            CornerRadius = new CornerRadius(4.25 * _u),
+            CornerRadius = new CornerRadius(4.25 * _u * _rs),
             HorizontalAlignment = HorizontalAlignment.Left,
             Background = new SolidColorBrush(_p.Ok),
         };
-        var bar = new Grid { Margin = new Thickness(0, 5 * _u, 0, 0) };
+        var bar = new Grid { Margin = new Thickness(0, 5 * _u * _rs, 0, 0) };
         bar.Children.Add(track);
         bar.Children.Add(fill);
         inner.Children.Add(bar);
@@ -615,7 +602,7 @@ internal sealed class WidgetView
         if (graphs)
         {
             graph = Graph($"panel.{key}", new SolidColorBrush(_p.Ok), Brushes.Transparent, isTemp ? 0 : 100, 24 * _u * _c.GraphHeightScale);
-            graph.Margin = new Thickness(0, 6 * _u, 0, 0);
+            graph.Margin = new Thickness(0, 6 * _u * _rs, 0, 0);
             inner.Children.Add(graph);
         }
 
@@ -641,7 +628,8 @@ internal sealed class WidgetView
                              (string label, Func<Metrics, string> text, Brush color, Func<Metrics, double> value) left,
                              (string label, Func<Metrics, string> text, Brush color, Func<Metrics, double> value) right)
     {
-        var grid = new Grid();
+        // la scala righe allarga anche la coppia lettura/scrittura (o upload/download)
+        var grid = new Grid { Margin = new Thickness(0, 3 * _u * (_rs - 1), 0, 3 * _u * (_rs - 1)) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
@@ -664,10 +652,10 @@ internal sealed class WidgetView
         if (graphs)
         {
             graphLeft = Graph($"panel.{element}.l", colorLeft, Brushes.Transparent, 0, 22 * _u * _c.GraphHeightScale);
-            graphLeft.Margin = new Thickness(0, 5 * _u, 0, 0);
+            graphLeft.Margin = new Thickness(0, 5 * _u * _rs, 0, 0);
             cellLeft.Children.Add(graphLeft);
             graphRight = Graph($"panel.{element}.r", colorRight, Brushes.Transparent, 0, 22 * _u * _c.GraphHeightScale);
-            graphRight.Margin = new Thickness(0, 5 * _u, 0, 0);
+            graphRight.Margin = new Thickness(0, 5 * _u * _rs, 0, 0);
             cellRight.Children.Add(graphRight);
         }
 
@@ -724,16 +712,20 @@ internal sealed class WidgetView
             trackGrid.Children.Add(track);
             trackGrid.Children.Add(fill);
 
-            var graph = Graph($"tiles.{el}.main", new SolidColorBrush(_p.Text), Brushes.Transparent, 100,
-                              18 * _ts * _c.GraphHeightScale);
-            graph.Margin = new Thickness(0, 2, 0, 0);
+            var graph = el == "ai" ? null : Graph($"tiles.{el}.main", new SolidColorBrush(_p.Text), Brushes.Transparent, 100,
+                                                  18 * _ts * _c.GraphHeightScale);
+            if (graph != null) graph.Margin = new Thickness(0, 2, 0, 0);
 
             var inner = new StackPanel();
             inner.Children.Add(icon);
             inner.Children.Add(name);
             inner.Children.Add(main);
-            inner.Children.Add(trackGrid);
-            inner.Children.Add(graph);
+            // la sezione AI è solo testo: niente barra né grafico
+            if (el != "ai")
+            {
+                inner.Children.Add(trackGrid);
+                inner.Children.Add(graph!);
+            }
             inner.Children.Add(sub);
 
             var tile = Surface(10, _p.Card, new Thickness(10, 8, 10, 10), new Thickness(4));
@@ -746,6 +738,7 @@ internal sealed class WidgetView
                 main.Text = d.main;
                 sub.Text = d.sub;
                 var c = d.lines[0].color;
+                if (graph == null) return;
                 fill.Background = c;
                 graph.StrokeA = c;
                 double w = trackGrid.ActualWidth > 2 ? trackGrid.ActualWidth : 90;

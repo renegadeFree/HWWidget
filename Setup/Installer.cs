@@ -71,7 +71,7 @@ static class Installer
         using (var k = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\HWWidget"))
         {
             k?.SetValue("DisplayName", AppName);
-            k?.SetValue("DisplayVersion", "1.0");
+            k?.SetValue("DisplayVersion", VersionOf(TargetExe));
             k?.SetValue("Publisher", "HW Widget");
             k?.SetValue("DisplayIcon", TargetExe);
             k?.SetValue("InstallLocation", TargetDir);
@@ -180,6 +180,17 @@ static class Installer
     static void TryDelete(string path)
     {
         try { if (File.Exists(path)) File.Delete(path); } catch { }
+    }
+
+    /// <summary>Versione del payload appena scritto, per "App installate" (1.0.2.0 → 1.0.2).</summary>
+    static string VersionOf(string exe)
+    {
+        try
+        {
+            string v = FileVersionInfo.GetVersionInfo(exe).FileVersion ?? "";
+            return v.EndsWith(".0", StringComparison.Ordinal) ? v[..^2] : v;
+        }
+        catch { return "1.0"; }
     }
 
     static void MakeShortcut(string linkPath, string target, string workDir)

@@ -17,6 +17,7 @@ sealed class AiSnapshot
 {
     public string DeepSeekBalance = "";     // "12,34 USD" oppure "" se non disponibile
     public double DeepSeekValue;            // valore numerico per il grafico
+    public string DeepSeekSpent = "";       // ricariche meno saldo = speso finora
     public string OpenAiWeek = "", OpenAiMonth = "";
     public double OpenAiWeekValue, OpenAiMonthValue;
     public string AnthropicWeek = "", AnthropicMonth = "";
@@ -124,11 +125,12 @@ static class AiUsage
                 string body = await res.Content.ReadAsStringAsync();
                 if (res.IsSuccessStatusCode)
                 {
-                    var (value, currency) = ParseDeepSeekBalance(body);
+                    var (value, spent, currency) = ParseDeepSeekBalance(body);
                     if (value.HasValue)
                     {
                         s.DeepSeekValue = value.Value;
                         s.DeepSeekBalance = value.Value.ToString("0.00", CultureInfo.CurrentCulture) + " " + currency;
+                        if (spent.HasValue) s.DeepSeekSpent = Money(Math.Max(0, spent.Value));
                     }
                 }
                 else problems.Add($"DeepSeek {(int)res.StatusCode}");
@@ -219,17 +221,21 @@ static class AiUsage
 
     // ---- parser tolleranti: cercano i campi utili invece di fissare lo schema ----
 
-    public static (double? value, string currency) ParseDeepSeekBalance(string json)
+    /// <summary>Saldo e speso. ponytail: lo speso è ricariche meno saldo, con i crediti
+    /// omaggio può risultare 0; DeepSeek non espone un totale di token.</summary>
+    public static (double? value, double? spent, string currency) ParseDeepSeekBalance(string json)
     {
         using var doc = JsonDocument.Parse(json);
         if (doc.RootElement.TryGetProperty("balance_infos", out var infos) && infos.GetArrayLength() > 0)
         {
             var first = infos[0];
             double? value = first.TryGetProperty("total_balance", out var t) ? ToNumber(t) : null;
+            double? topped = first.TryGetProperty("topped_up_balance", out var tp) ? ToNumber(tp) : null;
             string currency = first.TryGetProperty("currency", out var c) ? c.GetString() ?? "" : "";
-            return (value, currency);
+            double? spent = value.HasValue && topped.HasValue ? Math.Max(0, topped.Value - value.Value) : null;
+            return (value, spent, currency);
         }
-        return (null, "");
+        return (null, null, "");
     }
 
     /// <summary>Somma gli importi per giorno: funziona sia col formato OpenAI

@@ -327,7 +327,8 @@ sealed class ControlHub : Window
             Rebuild();
         }, accent: true));
         saveRow.Children.Add(TextButton("Rileggi ora", () => _ = SensorHub.RefreshAiAsync()));
-        _content.Children.Add(Card("\uE72C", "Chiavi", "Salvate cifrate (DPAPI) in " + Path.Combine(WidgetConfig.Dir, "keys.dat"),
+        // CardFull: con la card normale i campi stretti schiacciano la descrizione in verticale
+        _content.Children.Add(CardFull("\uE72C", "Chiavi", "Salvate cifrate (DPAPI) in " + Path.Combine(WidgetConfig.Dir, "keys.dat"),
             NewColumn(deepSeekRow, openAiRow, anthropicRow, githubRow, interval, saveRow)));
 
         SubTitle("Aggiornamenti");
@@ -413,14 +414,18 @@ sealed class ControlHub : Window
             ("\uEDA2", "Disco", Switch(() => c.ShowDisk, v => { c.ShowDisk = v; Apply(w, true); })),
             ("\uE9D2", "Metriche secondarie", Switch(() => c.ShowSecondary, v => { c.ShowSecondary = v; Apply(w, true); })),
             ("\uE8A7", "Titolo “HW Widget” nel pannello", Switch(() => c.ShowTitle, v => { c.ShowTitle = v; Apply(w, true); }))));
-        _content.Children.Add(Expander("\uE945", "Sezione AI", "DeepSeek, ChatGPT e Claude: saldo, spesa API e token.",
+        _content.Children.Add(Expander("\uE945", "Sezione AI", "Solo numeri, senza grafici: budget rimasto, budget consumato e token totali. " +
+                                                                 "Spegnendo un fornitore le sue righe spariscono dal widget.",
             ("\uE945", "Mostra la sezione AI", Switch(() => c.ShowAi, v => { c.ShowAi = v; Apply(w, true); })),
             ("\uE9D9", "DeepSeek (saldo API)", Switch(() => c.AiProviders.Contains("deepseek"),
                 v => { ToggleProvider(c, "deepseek", v); Apply(w, true); })),
             ("\uE9D9", "ChatGPT (spesa API + token dei log)", Switch(() => c.AiProviders.Contains("openai"),
                 v => { ToggleProvider(c, "openai", v); Apply(w, true); })),
             ("\uE9D9", "Claude (spesa API + token dei log)", Switch(() => c.AiProviders.Contains("anthropic"),
-                v => { ToggleProvider(c, "anthropic", v); Apply(w, true); }))));
+                v => { ToggleProvider(c, "anthropic", v); Apply(w, true); })),
+            ("\uE8C7", "Budget mensile DeepSeek (USD)", BudgetBox(c, "deepseek", w)),
+            ("\uE8C7", "Budget mensile ChatGPT (USD)", BudgetBox(c, "openai", w)),
+            ("\uE8C7", "Budget mensile Claude (USD)", BudgetBox(c, "anthropic", w))));
         _content.Children.Add(Expander("\uE8CB", "Ordine degli elementi", "Sposta le sezioni su e giù (primo = in alto).",
             OrderRows(w).ToArray()));
 
@@ -528,12 +533,19 @@ sealed class ControlHub : Window
     FrameworkElement CardFull(string glyph, string title, string description, FrameworkElement content)
     {
         var stack = new StackPanel();
-        var head = new StackPanel { Orientation = Orientation.Horizontal };
-        head.Children.Add(new TextBlock { Text = glyph, Style = (Style)Resources["HubGlyph"] });
+        // griglia (e non StackPanel orizzontale): così la descrizione va a capo dentro la
+        // card invece di allargarla oltre la finestra e ridursi a una lettera per riga
+        var head = new Grid();
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var icon = new TextBlock { Text = glyph, Style = (Style)Resources["HubGlyph"] };
+        Grid.SetColumn(icon, 0);
+        head.Children.Add(icon);
         var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         texts.Children.Add(new TextBlock { Text = title, Style = (Style)Resources["HubCardTitle"] });
         if (description.Length > 0)
             texts.Children.Add(new TextBlock { Text = description, Style = (Style)Resources["HubCardDesc"] });
+        Grid.SetColumn(texts, 1);
         head.Children.Add(texts);
         stack.Children.Add(head);
         content.Margin = new Thickness(22, 10, 0, 0);
@@ -553,6 +565,26 @@ sealed class ControlHub : Window
         return sp;
     }
 
+    /// <summary>Etichetta a sinistra, controllo a destra.</summary>
+    FrameworkElement Labelled(string label, FrameworkElement control)
+    {
+        var row = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var lab = new TextBlock
+        {
+            Text = label,
+            VerticalAlignment = VerticalAlignment.Center,
+            Style = (Style)Resources["HubCardDesc"],
+        };
+        Grid.SetColumn(lab, 0);
+        row.Children.Add(lab);
+        control.Margin = new Thickness(0, 0, 12, 0);
+        Grid.SetColumn(control, 1);
+        row.Children.Add(control);
+        return row;
+    }
+
     (FrameworkElement Row, PasswordBox Box) KeyRow(string label, string value)
     {
         var box = new PasswordBox
@@ -560,18 +592,33 @@ sealed class ControlHub : Window
             Password = value,
             Width = 320,
             Style = (Style)Resources["HubPassword"],
-            Margin = new Thickness(0, 0, 12, 6),
         };
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
-        row.Children.Add(new TextBlock
+        return (Labelled(label, box), box);
+    }
+
+    /// <summary>Campo numerico con conferma su Invio o quando perde il fuoco.</summary>
+    FrameworkElement NumberBox(Func<double> get, Action<double> set, string tooltip = "")
+    {
+        var box = new TextBox
         {
-            Text = label,
-            Width = 260,
+            Text = Num(get()),
+            Width = 92,
+            TextAlignment = TextAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
-            Style = (Style)Resources["HubCardDesc"],
-        });
-        row.Children.Add(box);
-        return (row, box);
+            Style = (Style)Resources["HubTextBox"],
+            ToolTip = tooltip,
+        };
+        void Commit()
+        {
+            string text = box.Text.Replace(',', '.').Trim();
+            if (text.Length > 0 && double.TryParse(text, System.Globalization.NumberStyles.Float,
+                                                  System.Globalization.CultureInfo.InvariantCulture, out double v))
+                set(v);
+            box.Text = Num(get());
+        }
+        box.KeyDown += (_, e) => { if (e.Key == Key.Enter) Commit(); };
+        box.LostFocus += (_, _) => Commit();
+        return box;
     }
 
     void ToggleProvider(WidgetConfig c, string provider, bool on)
@@ -579,6 +626,12 @@ sealed class ControlHub : Window
         if (on) { if (!c.AiProviders.Contains(provider)) c.AiProviders.Add(provider); }
         else c.AiProviders.Remove(provider);
     }
+
+    /// <summary>Budget mensile (USD) usato dal widget per il "budget rimasto". 0 = non impostato.</summary>
+    FrameworkElement BudgetBox(WidgetConfig c, string provider, MainWindow w)
+        => NumberBox(() => c.AiBudget(provider),
+                     v => { c.AiBudgets[provider] = Math.Clamp(v, 0, 1e6); Apply(w); },
+                     "Importo mensile in USD che vuoi tenere sotto controllo (0 = non impostato). Il widget mostra budget rimasto = budget − speso del mese.");
 
     async Task CheckUpdates(TextBlock status)
     {

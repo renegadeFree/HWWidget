@@ -11,6 +11,13 @@ static class Program
     static void Main(string[] args)
     {
         if (args.Length > 0 && args[0] == "--selftest") { SelfTest.Run(); return; }
+        if (args.Length > 0 && args[0] == "--updatetest") { SelfTest.UpdateDownloadTest(); return; }
+        // aggiornamento senza interfaccia: prova il giro completo release → installazione
+        if (args.Contains("--update-silent"))
+        {
+            Updater.SilentUpdate(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "hwwidget-update.txt"));
+            return;
+        }
 
         using var mutex = new Mutex(true, @"Local\HWWidget.SingleInstance", out bool first);
         if (!first) return;
