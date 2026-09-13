@@ -25,10 +25,17 @@ e un hub di controllo in stile Impostazioni di Windows.
   più inserimento manuale di numeri e colori e riordino delle sezioni.
 - **Tray**: doppio clic = hub, clic singolo = mostra/nascondi, tasto destro = menu.
 - **Avvio con Windows**, icona dell'app e installer standalone.
-- **Sezione AI**: saldo DeepSeek, spesa API di OpenAI/Anthropic (chiavi salvate con DPAPI)
-  e token totali di ChatGPT/Claude letti dai log locali delle CLI. Widget dedicato con i
-  provider che scegli tu.
+- **Sezione AI** (solo numeri, senza grafici): budget rimasto, budget consumato e token
+  totali per ogni fornitore attivo. Saldo DeepSeek dall'API, spesa OpenAI/Anthropic dalle
+  API di fatturazione (chiavi salvate con DPAPI), token di ChatGPT/Claude dai log locali
+  delle CLI, budget rimasto = budget mensile − speso (budget per widget, nell'hub).
+  Spegnendo un fornitore le sue righe spariscono dal widget.
+
+  ![Widget AI](docs/ai.png)
+
 - **Aggiornamento automatico** dalle release GitHub: controlla, chiede, scarica e riavvia.
+  `HWWidget.exe --update-silent` fa lo stesso giro senza interfaccia (per aggiornamenti
+  pianificati e per verificare una release appena pubblicata).
 
 ## Struttura
 
@@ -51,6 +58,7 @@ Setup/              installer standalone (progetto separato)
 ```powershell
 dotnet build -c Release                     # app
 dotnet run --project . -- --selftest        # controlli dei sensori e delle configurazioni
+                                            # (include posizione/dimensioni e sezione AI)
 dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o dist
 ```
 
