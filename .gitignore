@@ -1,0 +1,18 @@
+# build output
+bin/
+obj/
+dist/
+dist-sc/
+installer/
+
+# screenshot di verifica (teniamo solo quelle in docs/)
+/*.png
+
+# file locali
+backup-settings.json
+*.user
+*.suo
+.vs/
+
+# riferimento esterno usato solo per lo studio della grafica
+DeskBox-ref/

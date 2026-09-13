@@ -1,0 +1,195 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32;
+
+namespace HWWidget;
+
+/// <summary>Runnable sanity check for samplers, graphs, config and autostart:
+/// HWWidget.exe --selftest</summary>
+static class SelfTest
+{
+    [DllImport("kernel32.dll")] static extern bool AttachConsole(int pid);
+
+    static readonly StringBuilder Log = new();
+
+    public static void Run()
+    {
+        AttachConsole(-1);
+        try
+        {
+            var cpu = new CpuSampler(); cpu.LoadStatic(); cpu.Prime();
+            var ram = new RamSampler(); ram.LoadStatic(); ram.Sample();
+            var net = new NetSampler();
+            var disk = new DiskSampler(); disk.Open();
+            using var gpu = new GpuSampler(); bool gpuOk = gpu.Open(0);
+
+            System.Threading.Thread.Sleep(1100);
+            cpu.Sample(); ram.Sample(); net.Sample(); gpu.Sample(); disk.Sample();
+            System.Threading.Thread.Sleep(1100);
+            disk.Sample();
+
+            Say("cpu", $"{cpu.Name} | base={cpu.BaseMhz}MHz cur={cpu.CurrentMhz}MHz | usage={cpu.Usage:0.0}%");
+            Say("ram", $"{ram.UsedGb:0.0}/{ram.TotalGb:0.0} GB ({ram.UsagePct:0.0}%) | {ram.SpeedText}");
+            Say("net", $"{net.AdapterName} | ↓{net.DownBps / 1048576:0.00} MB/s ↑{net.UpBps / 1048576:0.00} MB/s | link {net.LinkBps / 1e6:0} Mbps");
+            Say("gpu", gpuOk
+                ? $"{gpu.Name} | util={gpu.Util}% vram={gpu.VramUsedGb:0.0}/{gpu.VramTotalGb:0.0}GB {gpu.MemUtil}% | {gpu.Watts:0.0}/{gpu.WattsLimit:0}W | {gpu.TempC:0}C {gpu.ClockMhz:0}MHz"
+                : "NVML non disponibile");
+            Say("disco", disk.Available
+                ? $"lettura {disk.ReadBps / 1048576:0.00} MB/s · scrittura {disk.WriteBps / 1048576:0.00} MB/s"
+                : "contatori disco non disponibili");
+
+            Check(cpu.Usage is >= 0 and <= 100, "cpu usage fuori range");
+            Check(cpu.BaseMhz > 0, "clock CPU non letto");
+            Check(ram.TotalGb > 1 && ram.UsedGb <= ram.TotalGb, "RAM incoerente");
+            Check(net.DownBps >= 0 && net.UpBps >= 0, "throughput negativo");
+            if (disk.Available)
+                Check(disk.ReadBps >= 0 && disk.WriteBps >= 0 && disk.ReadBps < 5e9, "valori disco implausibili");
+
+            // guards the hand-written MIB_IF_ROW2 layout: totals must be >= the IPv4-only subset
+            ulong total = 0;
+            foreach (var r in NetSampler.Read()) total += r.rx + r.tx;
+            ulong v4 = 0;
+            foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.NetworkInterfaceType is System.Net.NetworkInformation.NetworkInterfaceType.Loopback
+                    or System.Net.NetworkInformation.NetworkInterfaceType.Tunnel) continue;
+                if (ni.Name.Contains("Bluetooth", StringComparison.OrdinalIgnoreCase)) continue;
+                try { var st = ni.GetIPStatistics(); v4 += (ulong)st.BytesReceived + (ulong)st.BytesSent; } catch { }
+            }
+            Say("net-counters", $"GetIfTable2={total / 1e6:0.0} MB | sottoinsieme IPv4={v4 / 1e6:0.0} MB");
+            // the two reads happen a moment apart, so live traffic can make the second
+            // slightly larger: allow a small slack while still catching a broken layout
+            Check(total + 8_000_000 >= v4, "contatori GetIfTable2 < IPv4: struct MIB_IF_ROW2 disallineata");
+            Say("net-struct", $"rowSize={NetSampler.RowSize}");
+            Check(NetSampler.RowSize == 1352, $"dimensione MIB_IF_ROW2 inattesa: {NetSampler.RowSize}");
+
+            if (gpuOk)
+            {
+                Check(gpu.Util <= 100 && gpu.MemUtil <= 100, "util GPU fuori range");
+                Check(gpu.VramUsedGb <= gpu.VramTotalGb && gpu.VramTotalGb > 1, "VRAM incoerente");
+                Check(gpu.Watts is > 0 and < 2000, "watt GPU implausibili");
+            }
+
+            // ring buffer: capacity wraps and the visible window slides correctly
+            foreach (GraphStyle style in Enum.GetValues<GraphStyle>())
+            {
+                var sp = new Sparkline { WindowSamples = 60, VMax = 0, GraphStyle = style };
+                for (int i = 0; i < 1500; i++) sp.Push(i);
+                Check(sp.Count == 1200, $"ring buffer ({style}): attesi 1200 campioni, trovati {sp.Count}");
+                Check(sp.ProbeLast() == 1499, $"ultimo campione errato ({style})");
+                Check(sp.ProbeOldest(60) == 1440, $"finestra visibile errata ({style})");
+            }
+            Say("grafici", "1200 campioni, finestra scorrevole OK su 4 stili (area, linea, barre, scalini)");
+
+            // config: a broken file must be repaired, and element presets must stay valid
+            var broken = new WidgetConfig
+            {
+                PanelOpacity = 5, TextScale = 40, RowScale = 0.01, GraphWidthScale = 99,
+                IntervalSeconds = 5, GraphSeconds = 7, Backdrop = "boh", Theme = "x", Layout = "y",
+                ShowNet = false, ShowCpu = false, ShowGpu = false, ShowRam = false, ShowDisk = false,
+            }.Sanitized();
+            Check(broken.PanelOpacity <= 1 && broken.TextScale <= 2.2 && broken.RowScale >= 0.6, "clamp scale fallito");
+            Check(broken.GraphWidthScale is > 0 and <= 4, "clamp larghezza grafici fallito");
+            Check(broken.IntervalSeconds == 1 && broken.GraphSeconds == 60, "valori di default non ripristinati");
+            Check(broken.Backdrop == "blur" && broken.Theme == "system" && broken.Layout == "rows", "stringhe non valide non sanate");
+            Check(new WidgetConfig { Backdrop = "blur" }.Sanitized().Backdrop == "blur", "backdrop blur non accettato");
+            Check(broken.Elements.Any(), "nessun elemento visibile dopo la sanificazione");
+            Say("config", $"sanificata: opacity={broken.PanelOpacity} text={broken.TextScale:0.0} righe={broken.RowScale:0.0} larghezzaGrafici={broken.GraphWidthScale:0.0} intervallo={broken.IntervalSeconds}s");
+
+            var onlyGpu = new WidgetConfig { ShowNet = false, ShowCpu = false, ShowGpu = true, ShowRam = false, ShowDisk = false };
+            Check(onlyGpu.Elements.SequenceEqual(new[] { "gpu" }), "preset solo GPU errato");
+            var two = new WidgetConfig { ShowNet = false, ShowCpu = true, ShowGpu = true, ShowRam = false, ShowDisk = false };
+            Check(two.Elements.SequenceEqual(new[] { "cpu", "gpu" }), "preset CPU+GPU errato");
+            var all = new WidgetConfig();
+            Check(all.Elements.SequenceEqual(new[] { "net", "cpu", "gpu", "ram", "disk" }), "preset Tutto errato");
+            Check(new WidgetConfig { Layout = "panel" }.Sanitized().Layout == "panel", "layout pannello non accettato");
+            Check(new WidgetConfig { Layout = "panelgraph" }.Sanitized().Layout == "panelgraph", "layout pannello+grafici non accettato");
+            Say("preset", $"solo GPU = [{string.Join(",", onlyGpu.Elements)}] · CPU+GPU = [{string.Join(",", two.Elements)}] · tutto = [{string.Join(",", all.Elements)}]");
+
+            // layouts must build and produce binding targets for every metric row
+            foreach (string layout in new[] { "rows", "cards", "tiles", "panel", "panelgraph" })
+            {
+                var cfg = new WidgetConfig { Layout = layout };
+                int elements = cfg.Elements.Count();
+                int rows = cfg.Elements.Sum(el => WidgetView.LineCount(cfg, el));
+                var view = new WidgetView(cfg, Palette.For("dark"), new Dictionary<string, Series>(), 300);
+                view.Bind(new Metrics { GpuOk = true, NetLink = 1e9, RamTotal = 64, VramTotal = 12, DiskOk = true, DiskRead = 1e6, DiskWrite = 2e6 });
+                // rows/cards/tiles bind once per element; the panel layouts bind once per metric row
+                int expect = layout is "panel" or "panelgraph"
+                    ? cfg.Elements.Sum(el => el == "gpu" ? 3 : 1)
+                    : elements;
+                Check(view.BoundCount == expect, $"layout {layout}: bind {view.BoundCount} != attesi {expect}");
+                Check(rows >= elements, $"layout {layout}: conteggio righe incoerente");
+                view.Root.Measure(new System.Windows.Size(274, double.PositiveInfinity));
+                double wanted = view.Root.DesiredSize.Height;
+                Check(wanted > 60, $"layout {layout}: contenuto troppo basso ({wanted:0})");
+                Say("layout", $"{layout}: {elements} elementi, {rows} righe, {view.BoundCount} bind, contenuto {wanted:0} DIP a 300 di larghezza");
+            }
+
+            var light = Palette.For("light");
+            var dark = Palette.For("dark");
+            Check(light.Text != dark.Text, "palette chiaro/scuro identiche: il testo non seguirebbe il tema");
+            Check(light.IsLight && !dark.IsLight, "flag tema errati");
+            Say("palette", $"scuro testo=#{dark.Text.R:X2}{dark.Text.G:X2}{dark.Text.B:X2} chiaro testo=#{light.Text.R:X2}{light.Text.G:X2}{light.Text.B:X2}");
+
+            // per-meter colours and the global scale
+            var colored = new WidgetConfig
+            {
+                Colors = new Dictionary<string, string> { ["gpu"] = "#FF00FF", ["cpu"] = "non-un-colore" },
+            }.Sanitized();
+            Check(colored.ColorOf("gpu") == "#FF00FF", "colore fisso del misuratore perso");
+            Check(colored.ColorOf("cpu") == "auto", "colore non valido non scartato");
+            Check(colored.ColorOf("ram") == "auto", "misuratore senza colore non automatico");
+            Check(new WidgetConfig { UiScale = 9 }.Sanitized().UiScale == 2.5, "clamp scala interfaccia fallito");
+            Say("colori", $"gpu={colored.ColorOf("gpu")} cpu={colored.ColorOf("cpu")} ram={colored.ColorOf("ram")}");
+
+            var at100 = new WidgetView(new WidgetConfig { Layout = "panel" }, Palette.For("dark"), new Dictionary<string, Series>(), 300);
+            var at125 = new WidgetView(new WidgetConfig { Layout = "panel", UiScale = 1.25 }, Palette.For("dark"), new Dictionary<string, Series>(), 300);
+            at100.Root.Measure(new System.Windows.Size(274, double.PositiveInfinity));
+            at125.Root.Measure(new System.Windows.Size(274, double.PositiveInfinity));
+            Say("scala", $"pannello 100% = {at100.Root.DesiredSize.Height:0} DIP · 125% = {at125.Root.DesiredSize.Height:0} DIP");
+            Check(at125.Root.DesiredSize.Height > at100.Root.DesiredSize.Height * 1.1, "la scala generale non ingrandisce il contenuto");
+
+            Say("config-dir", WidgetConfig.Dir);
+
+            // autostart: same registry value the menus write
+            const string runKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+            using (var k = Registry.CurrentUser.OpenSubKey(runKey, true))
+            {
+                var before = k?.GetValue("HWWidget");
+                k?.SetValue("HWWidget", "\"C:\\percorso\\di\\prova\\HWWidget.exe\"");
+                bool wrote = k?.GetValue("HWWidget") != null;
+                if (before == null) k?.DeleteValue("HWWidget", false);
+                else k?.SetValue("HWWidget", before);
+                bool restored = (k?.GetValue("HWWidget")?.ToString() ?? "") == (before?.ToString() ?? "");
+                Say("autostart", $"scrittura={wrote} ripristino={restored}");
+                Check(wrote, "chiave di avvio automatico non scrivibile");
+                Check(restored, "ripristino della chiave di avvio fallito");
+            }
+
+            Say("esito", "OK");
+        }
+        catch (Exception ex)
+        {
+            Say("esito", "FALLITO: " + ex.Message);
+            Environment.ExitCode = 1;
+        }
+        Console.Out.Write(Log.ToString());
+        try
+        {
+            System.IO.File.WriteAllText(
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "hwwidget-selftest.txt"), Log.ToString());
+        }
+        catch { }
+    }
+
+    static void Say(string tag, string msg) => Log.AppendLine($"[{tag}] {msg}");
+
+    static void Check(bool ok, string msg)
+    {
+        if (!ok) throw new Exception(msg);
+    }
+}
