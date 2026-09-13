@@ -180,6 +180,22 @@ static class SelfTest
                                                 new Dictionary<string, Series>(), 300).Root) > 0,
                   "il pannello con grafici non disegna più alcun grafico");
 
+            // budget mensile: rimasto = budget − speso (e il budget vive nel file del widget)
+            var budgetCfg = new WidgetConfig
+            {
+                Layout = "panelgraph", ShowNet = false, ShowCpu = false, ShowGpu = false, ShowRam = false,
+                ShowDisk = false, ShowAi = true, AiProviders = new List<string> { "openai" },
+                AiBudgets = new Dictionary<string, double> { ["openai"] = 25, ["anthropic"] = -3, ["boh"] = 10 },
+            }.Sanitized();
+            Check(budgetCfg.AiBudget("openai") == 25 && budgetCfg.AiBudget("anthropic") == 0 && budgetCfg.AiBudgets.Count == 1,
+                  "budget AI non sanato");
+            var budgetView = new WidgetView(budgetCfg, Palette.For("dark"), new Dictionary<string, Series>(), 330);
+            budgetView.Bind(new Metrics { Ai = new AiSnapshot { OpenAiMonth = "12,00 $", OpenAiMonthValue = 12 } });
+            var texts = new List<string>();
+            CollectTexts(budgetView.Root, texts);
+            Check(texts.Any(t => t.Contains("13,00")), "budget rimasto non calcolato: " + string.Join(" | ", texts));
+            Say("ai-budget", $"budget 25 $ − speso 12 $ = {texts.First(t => t.Contains("13,00"))}");
+
             Say("config-dir", WidgetConfig.Dir);
 
             // --- AI: parser e log locali ---
@@ -334,6 +350,13 @@ static class SelfTest
         foreach (var c in System.Windows.LogicalTreeHelper.GetChildren(o))
             if (c is System.Windows.DependencyObject d) n += CountSparklines(d);
         return n;
+    }
+
+    static void CollectTexts(System.Windows.DependencyObject o, List<string> into)
+    {
+        if (o is System.Windows.Controls.TextBlock t) into.Add(t.Text);
+        foreach (var c in System.Windows.LogicalTreeHelper.GetChildren(o))
+            if (c is System.Windows.DependencyObject d) CollectTexts(d, into);
     }
 
     /// <summary>Svuota la coda del dispatcher fino alle operazioni inattive (Layout/Loaded
