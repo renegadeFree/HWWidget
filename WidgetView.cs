@@ -547,6 +547,12 @@ internal sealed class WidgetView
                     ("Download", m => Rate(m.NetDown), new SolidColorBrush(_p.NetDown), m => m.NetDown)));
                 break;
         }
+        // DeepSeek ha già le sue card interne (saldo, modelli, grafico): niente card esterna
+        if (el == "ds")
+        {
+            section.Children.Add(body);
+            return section;
+        }
         var card = Surface(9 * _u, _p.Card, new Thickness(CardPad, 9 * _u * _rs, CardPad, CardBottom), new Thickness(0));
         card.Child = body;
         section.Children.Add(card);

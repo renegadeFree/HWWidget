@@ -322,7 +322,7 @@ sealed class ControlHub : Window
         (FrameworkElement deepSeekUsageRow, PasswordBox deepSeekUsage) = KeyRow("Token di utilizzo DeepSeek", keys.DeepSeekUsage);
         (FrameworkElement openAiRow, PasswordBox openAi) = KeyRow("OpenAI admin key", keys.OpenAi);
         (FrameworkElement anthropicRow, PasswordBox anthropic) = KeyRow("Anthropic admin key", keys.Anthropic);
-        (FrameworkElement githubRow, PasswordBox github) = KeyRow("Token GitHub (aggiornamenti, repo privata)", keys.GitHub);
+        (FrameworkElement githubRow, PasswordBox github) = KeyRow("Token GitHub (opzionale, solo per il limite API)", keys.GitHub);
         var interval = Combo(new[] { "5", "15", "60", "180" },
             new[] { "5 minuti", "15 minuti", "1 ora", "3 ore" },
             () => keys.RefreshMinutes.ToString(),
@@ -395,7 +395,8 @@ sealed class ControlHub : Window
         if (updateRow.Children[1] is CheckBox startupBox)
             startupBox.Click += (_, _) => { keys.CheckUpdatesOnStartup = startupBox.IsChecked == true; keys.Save(); };
         _content.Children.Add(CardFull("\uE895", "Aggiornamento automatico",
-            "Legge l'ultima release della repo privata con il token GitHub qui sopra, scarica l'installer e aggiorna.",
+            "Legge l'ultima release pubblica da GitHub (senza token), scarica l'installer e aggiorna. " +
+            "Le impostazioni di app e widget restano: vivono in %APPDATA%\\HWWidget.",
             NewColumn(updateInfo, updateRow)));
 
         SubTitle("Avvio e accesso");
@@ -707,9 +708,8 @@ sealed class ControlHub : Window
         var info = await Updater.CheckAsync(keys.GitHub);
         if (info == null)
         {
-            status.Text = keys.GitHub.Length == 0
-                ? "Serve un token GitHub per leggere le release della repo privata."
-                : $"Nessuna release trovata (versione installata {Updater.CurrentText}).";
+            status.Text = $"Nessuna release leggibile da GitHub (versione installata {Updater.CurrentText}). " +
+                          "Controlla la connessione; con molti controlli ravvicinati aggiungi un token qui sopra.";
             return;
         }
         if (!Updater.IsNewer(info))

@@ -162,26 +162,36 @@ internal sealed class WidgetConfig
 
     public static WidgetConfig Load(string id)
     {
-        try
-        {
-            string f = FileOf(id);
-            if (System.IO.File.Exists(f))
-            {
-                var c = JsonSerializer.Deserialize<WidgetConfig>(System.IO.File.ReadAllText(f)) ?? new WidgetConfig();
-                c.Id = id;
-                return c.Migrated().Sanitized();
-            }
-        }
-        catch { }
-        return new WidgetConfig { Id = id }.Sanitized();
+        // se il file è troncato (l'aggiornamento uccide l'app a metà scrittura) si riparte
+        // dall'ultima copia buona invece di azzerare le impostazioni
+        var c = Read(FileOf(id)) ?? Read(FileOf(id) + ".bak");
+        if (c == null) return new WidgetConfig { Id = id }.Sanitized();
+        c.Id = id;
+        return c.Migrated().Sanitized();
     }
 
+    static WidgetConfig? Read(string file)
+    {
+        try
+        {
+            return System.IO.File.Exists(file)
+                ? JsonSerializer.Deserialize<WidgetConfig>(System.IO.File.ReadAllText(file))
+                : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Scrittura atomica + copia di sicurezza: o il file è quello nuovo, o resta
+    /// quello vecchio. Mai un file a metà.</summary>
     public void Save()
     {
         try
         {
             Directory.CreateDirectory(Dir);
-            System.IO.File.WriteAllText(FileOf(Id), JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            string f = FileOf(Id), tmp = f + ".tmp";
+            System.IO.File.WriteAllText(tmp, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            if (System.IO.File.Exists(f)) System.IO.File.Replace(tmp, f, f + ".bak", true);
+            else System.IO.File.Move(tmp, f);
         }
         catch { }
     }

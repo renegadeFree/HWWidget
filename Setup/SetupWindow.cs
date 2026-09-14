@@ -13,7 +13,7 @@ sealed class SetupWindow : Window
 {
     readonly CheckBox _startup = new() { Content = "Avvia con Windows", IsChecked = true };
     readonly CheckBox _desktop = new() { Content = "Crea un collegamento sul desktop", IsChecked = true };
-    readonly CheckBox _copySettings = new() { Content = "Copia la configurazione dei widget di questo PC", IsChecked = true };
+    readonly CheckBox _copySettings = new() { Content = "Copia di sicurezza di impostazioni e chiavi", IsChecked = true };
     readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, Opacity = 0.85, Margin = new Thickness(0, 10, 0, 0) };
     readonly Button _install = new();
     readonly Button _uninstall = new();

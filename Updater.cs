@@ -20,8 +20,8 @@ sealed class UpdateInfo
     public long Size;
 }
 
-/// <summary>Auto-update dalle release GitHub. La repo è privata, quindi serve un token
-/// (salvato con DPAPI come le altre chiavi): viene usato solo per leggere le release.</summary>
+/// <summary>Auto-update dalle release GitHub. La repo è pubblica: il token è opzionale,
+/// serve solo ad alzare il limite di richieste dell'API (60/ora per IP senza token).</summary>
 static class Updater
 {
     public const string Repo = "renegadeFree/HWWidget";
@@ -34,10 +34,9 @@ static class Updater
 
     public static async Task<UpdateInfo?> CheckAsync(string token, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(token)) return null;
         using var req = new HttpRequestMessage(HttpMethod.Get,
             $"https://api.github.com/repos/{Repo}/releases/latest");
-        req.Headers.Add("Authorization", "token " + token.Trim());
+        if (!string.IsNullOrWhiteSpace(token)) req.Headers.Add("Authorization", "token " + token.Trim());
         req.Headers.Add("User-Agent", "HWWidget");
         req.Headers.Add("Accept", "application/vnd.github+json");
         using var res = await Http.SendAsync(req, ct);
@@ -68,7 +67,7 @@ static class Updater
     {
         string path = Path.Combine(Path.GetTempPath(), $"HWWidgetSetup-{info.Tag}.exe");
         using var req = new HttpRequestMessage(HttpMethod.Get, info.AssetUrl);
-        req.Headers.Add("Authorization", "token " + token.Trim());
+        if (!string.IsNullOrWhiteSpace(token)) req.Headers.Add("Authorization", "token " + token.Trim());
         req.Headers.Add("User-Agent", "HWWidget");
         req.Headers.Add("Accept", "application/octet-stream");
         using var res = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -113,7 +112,6 @@ static class Updater
         {
             Log($"versione installata {CurrentText}");
             var keys = AiKeys.Load();
-            if (keys.GitHub.Length == 0) { Log("nessun token GitHub salvato"); return "no-token"; }
             var info = CheckAsync(keys.GitHub).GetAwaiter().GetResult();
             if (info == null) { Log("nessuna release leggibile"); return "no-release"; }
             Log($"release trovata {info.Tag} · {info.AssetName} ({info.Size / 1048576.0:0} MB)");

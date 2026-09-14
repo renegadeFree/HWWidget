@@ -292,15 +292,11 @@ static class SelfTest
             Check(!Updater.IsNewer(new UpdateInfo { Version = Updater.Current }), "la versione installata non può essere più nuova di se stessa");
             Check(AiUsage.Tokens(254976079).EndsWith("M"), "formattazione token errata");
             Say("update", $"versione corrente {Updater.CurrentText} · repo {Updater.Repo}");
-            var ghKeys = AiKeys.Load();
-            if (ghKeys.GitHub.Length > 0)
-            {
-                var release = Updater.CheckAsync(ghKeys.GitHub).GetAwaiter().GetResult();
-                if (release == null) Say("update-check", "nessuna release leggibile (token o repo?)");
-                else Say("update-check", $"ultima release {release.Tag} ({release.AssetName}, {release.Size / 1048576.0:0} MB) · " +
-                                         $"aggiornamento disponibile: {(Updater.IsNewer(release) ? "sì" : "no")}");
-            }
-            else Say("update-check", "nessun token GitHub salvato: controllo aggiornamenti non testato");
+            // repo pubblica: il controllo deve funzionare anche senza token (è il caso normale)
+            var release = Updater.CheckAsync("").GetAwaiter().GetResult();
+            Check(release != null, "release non leggibile senza token: la repo è pubblica?");
+            Say("update-check", $"senza token: ultima release {release!.Tag} ({release.AssetName}, {release.Size / 1048576.0:0} MB) · " +
+                                $"aggiornamento disponibile: {(Updater.IsNewer(release) ? "sì" : "no")}");
 
             // autostart: same registry value the menus write
             const string runKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -407,7 +403,7 @@ static class SelfTest
         const string id = "selftest-fit";
         try
         {
-            new WidgetConfig { Id = id }.Delete();
+            DeleteConfig(id);
             var win = new MainWindow(WidgetConfig.Load(id));
             win.Show();
             Pump();
@@ -439,7 +435,38 @@ static class SelfTest
             }
             win.Close();
             Pump();
-            new WidgetConfig { Id = id }.Delete();
+            DeleteConfig(id);
+
+            // ingrandendo i contenuti cresce la finestra (non si rimpicciolisce il widget)
+            var growCfg = new WidgetConfig { Id = "selftest-grow", Width = 328, Height = 420,
+                                             Layout = "panelgraph" }.Sanitized();
+            var grow = new MainWindow(growCfg);
+            grow.Show();
+            Pump();
+            grow.Width = 328;
+            grow.Height = 420;
+            Pump();
+            System.Threading.Thread.Sleep(60);
+            Pump();
+            grow.Rebuild();
+            double before = grow.Height;
+            grow.Config.UiScale = 1.15;                // come muovere lo slider "Scala generale"
+            grow.ApplyConfig();
+            double after = grow.Height;
+            Say("crescita", $"scala 1,0 → 1,15: finestra {before:0} → {after:0} px " +
+                            $"(naturale {grow.ProbeNatural:0}, spazio {grow.ProbeAvail:0}, scala contenuto {grow.ProbeFit:0.000})");
+            Check(after > before + 20, $"la finestra non è cresciuta: {before:0} → {after:0}");
+            Check(grow.ProbeFit >= 0.999, $"crescendo non si deve rimpicciolire il contenuto (scala {grow.ProbeFit:0.000})");
+            grow.Config.Colors["gpu"] = "#FF00FF";     // modifica che non cambia la misura
+            grow.ApplyConfig();
+            Check(Math.Abs(grow.Height - after) < 2, $"un cambio di colore ha ridimensionato la finestra ({after:0} → {grow.Height:0})");
+            Say("crescita", $"cambio colore: finestra invariata ({grow.Height:0} px)");
+            grow.Close();
+            Pump();
+            DeleteConfig("selftest-grow");
+
+            // impostazioni: giro completo e recupero se il file resta troncato
+            SettingsPersistTest();
 
             // costo del riadattamento: gira a ogni ridimensionamento e a ogni modifica dall'hub
             var probe = new MainWindow(WidgetConfig.Load("main"));
@@ -458,6 +485,47 @@ static class SelfTest
             Say("fit-render", $"pannello adattato in {temp}hwwidget-fit-tall.png e -fit-small.png");
         }
         catch (Exception ex) { Say("fit", "FALLITO: " + ex.Message); Environment.ExitCode = 1; }
+    }
+
+    /// <summary>Le impostazioni non si perdono: giro completo di scrittura/lettura e
+    /// recupero dall'ultima copia buona se il file resta troncato (capita se
+    /// l'aggiornamento chiude l'app a metà scrittura).</summary>
+    static void SettingsPersistTest()
+    {
+        const string id = "selftest-save";
+        string file = System.IO.Path.Combine(WidgetConfig.Dir, "settings-" + id + ".json");
+        try
+        {
+            DeleteConfig(id);
+            var c = new WidgetConfig
+            {
+                Id = id, Name = "PROVA", Monitor = @"\\.\DISPLAY1", OffX = 123, OffY = 45,
+                Width = 321, Height = 654, HasPos = true, UiScale = 1.25, RowScale = 1.4,
+                TextScale = 0.9, PanelOpacity = 0.7, GraphSeconds = 300, Layout = "panelgraph",
+                Colors = new Dictionary<string, string> { ["gpu"] = "#FF00FF" },
+                Order = new List<string> { "gpu", "cpu", "ram", "disk", "net" },
+            }.Sanitized();
+            c.Save();
+            c.Save();                                   // la seconda scrittura crea anche il .bak
+            var r = WidgetConfig.Load(id);
+            Check(r.Name == "PROVA" && r.Width == 321 && r.Height == 654 && r.OffX == 123 && r.OffY == 45,
+                  "nome, posizione o misura persi nel salvataggio");
+            Check(Math.Abs(r.UiScale - 1.25) < 0.001 && Math.Abs(r.RowScale - 1.4) < 0.001 &&
+                  Math.Abs(r.TextScale - 0.9) < 0.001 && r.GraphSeconds == 300 && r.Layout == "panelgraph",
+                  "scale, durata grafici o layout persi");
+            Check(r.ColorOf("gpu") == "#FF00FF" && r.Order.FirstOrDefault() == "gpu", "colori o ordine persi");
+            Say("salvataggio", $"riletti nome, posizione {r.OffX:0},{r.OffY:0}, misura {r.Width:0}×{r.Height:0}, scale, colori e ordine");
+
+            System.IO.File.WriteAllText(file, "{ \"Name\": \"PRO");   // troncato a metà scrittura
+            var rescued = WidgetConfig.Load(id);
+            Check(rescued.Name == "PROVA" && rescued.Width == 321 && Math.Abs(rescued.UiScale - 1.25) < 0.001,
+                  "file troncato: impostazioni azzerate invece di usare la copia di sicurezza");
+            Say("salvataggio", $"file troncato recuperato dalla copia di sicurezza (nome \"{rescued.Name}\")");
+            rescued.Save();
+            Check(WidgetConfig.Load(id).Name == "PROVA", "riscrittura dopo il recupero fallita");
+            DeleteConfig(id);
+        }
+        catch (Exception ex) { Say("salvataggio", "FALLITO: " + ex.Message); Environment.ExitCode = 1; }
     }
 
     /// <summary>Pannello con dati finti: serve solo per i rendering di controllo.</summary>
@@ -487,7 +555,7 @@ static class SelfTest
         const string id = "selftest";
         try
         {
-            new WidgetConfig { Id = id }.Delete();
+            DeleteConfig(id);
             var win = new MainWindow(WidgetConfig.Load(id));
             win.Show();
             Pump();
@@ -529,7 +597,7 @@ static class SelfTest
         }
         catch (Exception ex)
         {
-            new WidgetConfig { Id = id }.Delete();
+            DeleteConfig(id);
             throw new Exception("geometria: " + ex.Message);
         }
     }
@@ -616,19 +684,18 @@ static class SelfTest
             () => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
-    /// <summary>Scarica davvero l'ultimo asset della release (verifica del percorso
-    /// autenticato verso la repo privata) e poi cancella il file.</summary>
+    /// <summary>Scarica davvero l'ultimo asset della release dalla repo pubblica (senza
+    /// token) e poi cancella il file.</summary>
     public static void UpdateDownloadTest()
     {
         AttachConsole(-1);
         try
         {
-            var keys = AiKeys.Load();
-            var info = Updater.CheckAsync(keys.GitHub).GetAwaiter().GetResult();
+            var info = Updater.CheckAsync("").GetAwaiter().GetResult();
             if (info == null) { Say("update", "nessuna release leggibile"); return; }
             Say("update", $"release {info.Tag}, asset {info.AssetName} ({info.Size / 1048576.0:0} MB)");
             var progress = new Progress<double>(p => { if (Math.Abs(p * 100 % 10) < 0.001) Say("update", $"  {p:P0}"); });
-            string path = Updater.DownloadAsync(info, keys.GitHub, progress).GetAwaiter().GetResult();
+            string path = Updater.DownloadAsync(info, "", progress).GetAwaiter().GetResult();
             var fi = new System.IO.FileInfo(path);
             Say("update", $"scaricato {fi.Name}: {fi.Length / 1048576.0:0.0} MB in {path}");
             System.IO.File.Delete(path);
@@ -648,6 +715,16 @@ static class SelfTest
     static void Check(bool ok, string msg)
     {
         if (!ok) throw new Exception(msg);
+    }
+
+    /// <summary>Cancella un widget di prova: file, copia di sicurezza e residuo di scrittura.</summary>
+    static void DeleteConfig(string id)
+    {
+        var c = new WidgetConfig { Id = id };
+        c.Delete();
+        string f = System.IO.Path.Combine(WidgetConfig.Dir, id == "main" ? "settings.json" : $"settings-{id}.json");
+        foreach (var s in new[] { ".bak", ".tmp" })
+            try { System.IO.File.Delete(f + s); } catch { }
     }
 
     // JSON di esempio con la struttura delle API interne DeepSeek (platform.deepseek.com),

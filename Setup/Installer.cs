@@ -26,6 +26,26 @@ static class Installer
     static string SetupCopy => Path.Combine(TargetDir, "HWWidgetSetup.exe");
     static string SettingsDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HWWidget");
+    static string BackupDir => Path.Combine(SettingsDir, "backup");
+
+    /// <summary>Copia di sicurezza di impostazioni e chiavi (i widget non vengono toccati).</summary>
+    static int BackupSettings()
+    {
+        int copied = 0;
+        try
+        {
+            if (!Directory.Exists(SettingsDir)) return 0;
+            Directory.CreateDirectory(BackupDir);
+            foreach (var pattern in new[] { "settings*.json", "keys.dat" })
+                foreach (var f in Directory.GetFiles(SettingsDir, pattern))
+                {
+                    File.Copy(f, Path.Combine(BackupDir, Path.GetFileName(f)), true);
+                    copied++;
+                }
+        }
+        catch { }
+        return copied;
+    }
 
     public static bool Installed => File.Exists(TargetExe);
 
@@ -44,18 +64,10 @@ static class Installer
         string extra = "";
         if (copySettings)
         {
-            int copied = 0;
-            try
-            {
-                Directory.CreateDirectory(SettingsDir);
-                foreach (var f in Directory.GetFiles(SettingsDir, "settings*.json"))
-                {
-                    File.Copy(f, Path.Combine(SettingsDir, Path.GetFileName(f)), true);
-                    copied++;
-                }
-            }
-            catch { }
-            extra = copied > 0 ? $" · configurazione copiata ({copied} file)" : " · nessuna configurazione da copiare";
+            // le impostazioni restano dove sono (l'installazione non le tocca mai): qui se ne
+            // fa solo una copia di sicurezza, per poter tornare indietro se qualcosa va storto
+            int copied = BackupSettings();
+            extra = copied > 0 ? $" · copia di sicurezza di {copied} file in {BackupDir}" : " · nessuna configurazione da salvare";
         }
 
         MakeShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), $"{AppName}.lnk"), TargetExe, TargetDir);
@@ -105,6 +117,8 @@ static class Installer
         }
         Thread.Sleep(600);
 
+        // prima di sostituire i file: copia di sicurezza di impostazioni e chiavi
+        BackupSettings();
         Install(hadStartup, hadDesktop, false, out _);
 
         try

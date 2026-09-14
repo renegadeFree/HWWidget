@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     ResourceDictionary _menuStyles;
     WidgetView _view = null!;
     double _naturalHeight;
+    double _prevNatural;
     double _fit = 1;
     double _avail;
     double _lastWidth = -1, _lastHeight = -1;
@@ -105,12 +106,28 @@ public partial class MainWindow : Window
     /// <summary>Il contenuto si adatta alla finestra: se non ci sta viene rimpicciolito
     /// (niente più tagli in basso), lo spazio libero lo prendono i grafici. La finestra
     /// non cambia mai misura da sola: resta dove e come la lascia l'utente.</summary>
-    internal void Rebuild()
+    internal void Rebuild() => Rebuild(false);
+
+    /// <summary>grow: quando la modifica arriva dalle opzioni (hub o menu) e il contenuto
+    /// non entra più, cresce la finestra invece di rimpicciolire tutto. Vale solo se la
+    /// finestra non era già stata rimpicciolita a mano (in quel caso comanda l'utente).</summary>
+    void Rebuild(bool grow)
     {
         double innerW = Math.Max(60, Host.ActualWidth > 10 ? Host.ActualWidth : _c.Width - 26);
         _view = new WidgetView(_c, _p, _series, innerW);
         double avail = InnerHeight() - 4;   // margine per gli arrotondamenti di layout/DPI
         _naturalHeight = Measured(_view, innerW);
+        // cresce se il contenuto è diventato più alto (scala, elementi, layout) e non entra:
+        // così lo slider si vede. Non cresce per modifiche che non cambiano la misura
+        // (colori, tema, materiale) né se il box è già stato rimpicciolito a mano.
+        bool taller = _naturalHeight > _prevNatural + 0.5;
+        if (grow && _naturalHeight > avail + 0.5 && (taller || _fit >= 0.999))
+        {
+            Height = FitHeight();
+            SavePosition();
+            avail = InnerHeight() - 4;
+        }
+        _prevNatural = _naturalHeight;
         _avail = avail;
 
         if (_naturalHeight > avail + 0.5)
@@ -467,7 +484,7 @@ public partial class MainWindow : Window
     void Changed(bool needRebuild = false)
     {
         _c.Sanitized().Save();
-        if (needRebuild) Rebuild();
+        if (needRebuild) Rebuild(true);
         ApplySurface();
     }
 
@@ -742,16 +759,15 @@ public partial class MainWindow : Window
 
     internal WidgetConfig Config => _c;
 
-    /// <summary>Re-applies everything from the config (used by the control hub for live
-    /// edits). La finestra non viene mai ridimensionata: la misura è dell'utente, il
-    /// contenuto si adatta.</summary>
+    /// <summary>Ri-applica tutto dalla configurazione (modifiche live dell'hub). Se il
+    /// contenuto non entra più, il widget cresce; non si rimpicciolisce mai da solo.</summary>
     public void ApplyConfig()
     {
         _p = Palette.For(_c.Theme);
         _menuStyles = MenuStyles.Create(_p);
         Foreground = new SolidColorBrush(_p.Text);
         Topmost = _c.Topmost;
-        Rebuild();
+        Rebuild(true);
         ApplyBackdrop();
         SensorHub.SetInterval(_c.Id, _c.IntervalSeconds);
         _c.Save();

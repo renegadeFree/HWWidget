@@ -37,7 +37,7 @@ sealed class AiKeys
     public string DeepSeek { get; set; } = "";
     public string OpenAi { get; set; } = "";
     public string Anthropic { get; set; } = "";
-    public string GitHub { get; set; } = "";      // per l'auto-update dalla repo privata
+    public string GitHub { get; set; } = "";      // opzionale: alza il limite delle API GitHub
     /// <summary>Token di sessione di platform.deepseek.com (uso e spesa): l'API ufficiale
     /// DeepSeek espone solo il saldo. Si prende dal browser: console → JSON.parse(localStorage.userToken).value</summary>
     public string DeepSeekUsage { get; set; } = "";
@@ -54,15 +54,27 @@ sealed class AiKeys
             var json = Secret.Unprotect(System.IO.File.ReadAllBytes(File));
             return JsonSerializer.Deserialize<AiKeys>(json) ?? new AiKeys();
         }
-        catch { return new AiKeys(); }
+        catch
+        {
+            try              // file troncato: si usa l'ultima copia buona
+            {
+                var json = Secret.Unprotect(System.IO.File.ReadAllBytes(File + ".bak"));
+                return JsonSerializer.Deserialize<AiKeys>(json) ?? new AiKeys();
+            }
+            catch { return new AiKeys(); }
+        }
     }
 
+    /// <summary>Scrittura atomica: le chiavi non si perdono se l'app viene chiusa a metà.</summary>
     public void Save()
     {
         try
         {
             Directory.CreateDirectory(WidgetConfig.Dir);
-            System.IO.File.WriteAllBytes(File, Secret.Protect(JsonSerializer.Serialize(this)));
+            string tmp = File + ".tmp";
+            System.IO.File.WriteAllBytes(tmp, Secret.Protect(JsonSerializer.Serialize(this)));
+            if (System.IO.File.Exists(File)) System.IO.File.Replace(tmp, File, File + ".bak", true);
+            else System.IO.File.Move(tmp, File);
         }
         catch { }
     }

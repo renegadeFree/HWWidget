@@ -58,7 +58,7 @@ sealed class AppController : IDisposable
         try
         {
             var keys = AiKeys.Load();
-            if (!keys.CheckUpdatesOnStartup || keys.GitHub.Length == 0) return;
+            if (!keys.CheckUpdatesOnStartup) return;
             await Task.Delay(8000);                       // lascia respirare l'avvio
             var info = await Updater.CheckAsync(keys.GitHub);
             if (info != null && Updater.IsNewer(info)) UpdateWindow.Start(info, keys.GitHub);
