@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     double _naturalHeight;
     double _fit = 1;
     double _avail;
+    double _lastWidth = -1, _lastHeight = -1;
     IntPtr _hwnd;
     HwndSource? _src;
     DateTime _lastUi = DateTime.MinValue;
@@ -58,17 +59,21 @@ public partial class MainWindow : Window
         _saveDebounce.Interval = TimeSpan.FromMilliseconds(700);
         _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); SavePosition(); };
 
-        // the content follows the window (fit and graph heights), so re-lay it out after a
-        // resize (the graph history lives outside the visual tree and survives the rebuild)
+        // Il contenuto segue la finestra: si riadatta durante il trascinamento (al massimo
+        // ogni 180 ms) e un'ultima volta quando la misura si ferma. La cronologia dei
+        // grafici vive fuori dall'albero visivo e sopravvive al riadattamento.
         _resizeDebounce.Interval = TimeSpan.FromMilliseconds(180);
         _resizeDebounce.Tick += (_, _) =>
         {
-            _resizeDebounce.Stop();
+            if (Math.Abs(_lastWidth - ActualWidth) < 0.5 && Math.Abs(_lastHeight - ActualHeight) < 0.5) return;
+            _lastWidth = ActualWidth;
+            _lastHeight = ActualHeight;
             Rebuild();
         };
+        _resizeDebounce.Start();
 
         LocationChanged += (_, _) => DebouncedSave();
-        SizeChanged += (_, _) => { DebouncedSave(); _resizeDebounce.Stop(); _resizeDebounce.Start(); };
+        SizeChanged += (_, _) => DebouncedSave();
         Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(RestorePosition));
         Deactivated += (_, _) => ApplyBackdrop();
 
@@ -761,6 +766,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         SavePosition();
+        _resizeDebounce.Stop();
         SensorHub.Tick -= OnTick;
         SensorHub.Forget(_c.Id);
         _src?.RemoveHook(WndProc);
