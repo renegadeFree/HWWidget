@@ -41,6 +41,7 @@ e un hub di controllo in stile Impostazioni di Windows.
   riferimento [Joyi-code/DeepSeekMonitorWindows](https://github.com/Joyi-code/DeepSeekMonitorWindows):
   saldo e disponibilità, costo di oggi e del mese, una riga compatta per modello (badge, token,
   barra della quota, cache hit, costo) e il grafico degli ultimi 7 giorni con valori e date.
+  In alto a destra un unico pulsante di aggiornamento: rilegge subito saldo, token e API.
   Saldo dall'API ufficiale; uso, spesa e cache hit dalle API interne di
   `platform.deepseek.com` (l'API ufficiale non li espone), con il token di sessione del sito.
   Per prenderlo: *Hub → Impostazioni app → Chiavi → "Accedi e prendi il token (automatico)"*

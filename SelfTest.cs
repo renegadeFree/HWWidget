@@ -222,12 +222,25 @@ static class SelfTest
             string png = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "hwwidget-deepseek.png");
             SavePng(dsView, 340, png);
             Say("deepseek-render", $"sezione DeepSeek disegnata in {png} ({dsView.BoundCount} bind)");
+            Check(HasRefreshButton(dsView.Root), "manca il pulsante di aggiornamento nella sezione DeepSeek");
             foreach (var sp in Sparklines(dsView.Root))
             {
                 Check(Math.Abs(sp.ActualHeight - sp.Height) < 1, "il grafico DeepSeek non rispetta l'altezza richiesta");
                 Check(sp.Count == 7, $"giorni nel grafico DeepSeek: {sp.Count} invece di 7");
                 Say("deepseek-spark", $"grafico {sp.ActualWidth:0}×{sp.ActualHeight:0} con {sp.Count} giorni impilati");
             }
+
+            // il pulsante rilegge davvero i dati (saldo dall'API)
+            string firstBalance = SensorHub.Current.Ai.Deep.Balance;
+            WidgetView.RefreshAll();
+            for (int i = 0; i < 80 && SensorHub.Current.Ai.Deep.Balance == firstBalance; i++)
+            {
+                System.Threading.Thread.Sleep(250);
+                Pump();
+            }
+            string afterBalance = SensorHub.Current.Ai.Deep.Balance;
+            Say("aggiorna", $"saldo prima='{firstBalance}' dopo='{afterBalance}'");
+            Check(afterBalance.Length > 0, "il pulsante di aggiornamento non ha letto il saldo DeepSeek");
 
             // pannello completo (per il controllo a occhio di spaziature e sfumature)
             var full = new WidgetView(new WidgetConfig { Layout = "panelgraph" }, Palette.For("dark"),
@@ -473,6 +486,15 @@ static class SelfTest
         foreach (var c in System.Windows.LogicalTreeHelper.GetChildren(o))
             if (c is System.Windows.DependencyObject d)
                 foreach (var x in Sparklines(d)) yield return x;
+    }
+
+    /// <summary>Il pulsante di aggiornamento del widget DeepSeek (unico, in alto a destra).</summary>
+    static bool HasRefreshButton(System.Windows.DependencyObject o)
+    {
+        if (o is System.Windows.Controls.Border b && b.ToolTip as string == "Aggiorna saldo, token e API") return true;
+        foreach (var c in System.Windows.LogicalTreeHelper.GetChildren(o))
+            if (c is System.Windows.DependencyObject d && HasRefreshButton(d)) return true;
+        return false;
     }
 
     static void CollectTexts(System.Windows.DependencyObject o, List<string> into)

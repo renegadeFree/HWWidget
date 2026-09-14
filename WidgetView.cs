@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using Brush = System.Windows.Media.Brush;
 using Brushes = System.Windows.Media.Brushes;
@@ -471,8 +472,22 @@ internal sealed class WidgetView
             Margin = new Thickness(0, 0, 5 * _u, 0),
         });
         headerContent.Children.Add(Txt(ElName(el), 11.5 * _u, new SolidColorBrush(_p.Text), bold: true));
-        headerContent.Margin = new Thickness(2 * _u, 0, 0, 3 * _u * _rs);
-        section.Children.Add(headerContent);
+        headerContent.VerticalAlignment = VerticalAlignment.Center;
+
+        // intestazione: nome sezione a sinistra, pulsante di aggiornamento a destra (DeepSeek)
+        var header = new Grid { Margin = new Thickness(2 * _u, 0, 0, 3 * _u * _rs) };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(headerContent, 0);
+        header.Children.Add(headerContent);
+        if (el == "ds")
+        {
+            var refresh = RefreshButton();
+            Grid.SetColumn(refresh, 2);
+            header.Children.Add(refresh);
+        }
+        section.Children.Add(header);
 
         // one card per section: the metric rows sit one under the other inside it
         var body = new StackPanel();
@@ -768,6 +783,48 @@ internal sealed class WidgetView
         b.Child = content;
         return b;
     }
+
+    /// <summary>Un solo pulsante: rilegge saldo, token e API (DeepSeek, OpenAI, Anthropic,
+    /// log locali) e ridisegna subito dopo la risposta.</summary>
+    FrameworkElement RefreshButton()
+    {
+        var glyph = Icon("\uE72C", 10 * _u, new SolidColorBrush(_p.TextDim));
+        var box = new Border
+        {
+            CornerRadius = new CornerRadius(5 * _u),
+            Padding = new Thickness(5 * _u, 1.5 * _u, 5 * _u, 1.5 * _u),
+            Background = Brushes.Transparent,
+            Child = glyph,
+            Cursor = Cursors.Hand,
+            VerticalAlignment = VerticalAlignment.Center,
+            ToolTip = "Aggiorna saldo, token e API",
+        };
+        box.MouseEnter += (_, _) =>
+        {
+            box.Background = new SolidColorBrush(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF));
+            glyph.Foreground = new SolidColorBrush(_p.Text);
+        };
+        box.MouseLeave += (_, _) =>
+        {
+            box.Background = Brushes.Transparent;
+            glyph.Foreground = new SolidColorBrush(_p.TextDim);
+        };
+        // il clic non deve finire nel trascinamento della finestra
+        box.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        box.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            glyph.Foreground = new SolidColorBrush(_p.Text);
+            RefreshAll();
+            var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            t.Tick += (_, _) => { t.Stop(); glyph.Foreground = new SolidColorBrush(_p.TextDim); };
+            t.Start();
+        };
+        return box;
+    }
+
+    /// <summary>Rilegge tutti i dati delle API AI (usato dal pulsante del widget e dai test).</summary>
+    public static void RefreshAll() => _ = SensorHub.RefreshAiAsync();
 
     /// <summary>Riquadro "Oggi" / "Mese" con l'importo.</summary>
     (FrameworkElement Box, TextBlock Value) DsStat(string glyph, string label)
