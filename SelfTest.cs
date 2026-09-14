@@ -319,6 +319,71 @@ static class SelfTest
 
     static void Say(string tag, string msg) => Log.AppendLine($"[{tag}] {msg}");
 
+    /// <summary>Prova la catena di acquisizione del token (finestra + arrivo dallo script +
+    /// verifica sull'API): HWWidget.exe --dslogin-test</summary>
+    public static void DsLoginTest()
+    {
+        AttachConsole(-1);
+        try
+        {
+            var w = new DeepSeekLogin();                 // non mostrata: la WebView non parte
+            w.FeedForTest(new string('x', 80));          // come se lo script avesse mandato un token
+            for (int i = 0; i < 40 && !w.StatusText.StartsWith("Token non valido"); i++)
+            {
+                System.Threading.Thread.Sleep(250);
+                Pump();
+            }
+            Say("dslogin", $"stato dopo un token finto: {w.StatusText}");
+            Check(w.StatusText.StartsWith("Token non valido"), "un token finto deve essere rifiutato e segnalato");
+            w.Close();
+            Say("esito", "OK");
+        }
+        catch (Exception ex) { Say("esito", "FALLITO: " + ex.Message); Environment.ExitCode = 1; }
+        Console.Out.Write(Log.ToString());
+        try
+        {
+            System.IO.File.WriteAllText(
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "hwwidget-dslogin.txt"), Log.ToString());
+        }
+        catch { }
+    }
+
+    /// <summary>Prova la lettura DeepSeek (saldo + uso) e salva le risposte grezze:
+    /// HWWidget.exe --dstest → %TEMP%\hwwidget-dstest.txt (+ i due JSON grezzi).</summary>
+    public static void DeepSeekTest()
+    {
+        AttachConsole(-1);
+        try
+        {
+            var keys = AiKeys.Load();
+            Say("chiavi", $"API key DeepSeek: {(keys.DeepSeek.Length > 0 ? $"presente ({keys.DeepSeek.Length} caratteri)" : "ASSENTE")} · " +
+                          $"token di utilizzo: {(keys.DeepSeekUsage.Length > 0 ? $"presente ({keys.DeepSeekUsage.Length} caratteri)" : "ASSENTE")}");
+            var u = DeepSeekUsage.FetchAsync(keys.DeepSeek, keys.DeepSeekUsage).GetAwaiter().GetResult();
+            Say("saldo", $"{u.Balance} · disponibile={u.Available} · speso={u.Spent}");
+            Say("uso", $"{u.Models.Count} modelli · {u.Days.Count} giorni · mese {u.MonthCost} · oggi {u.TodayCost}");
+            Say("stato", u.Status.Length > 0 ? u.Status : "(nessun problema)");
+            foreach (var m in u.Models)
+                Say("modello", $"{m.Key} → {m.Name} · {AiUsage.Tokens(m.Tokens)} token · {m.Requests:0} richieste · " +
+                               $"hit {m.HitPct:0}% miss {m.MissPct:0}% out {m.OutPct:0}% · costo {m.Cost:0.0000}");
+            foreach (var d in u.Days.Take(5))
+                Say("giorno", $"{d.Date} · hit {AiUsage.Tokens(d.Hit)} · miss {AiUsage.Tokens(d.Miss)} · out {AiUsage.Tokens(d.Out)} · costo {d.Cost:0.0000}");
+            string temp = System.IO.Path.GetTempPath();
+            if (u.RawAmount.Length > 0)
+                System.IO.File.WriteAllText(System.IO.Path.Combine(temp, "hwwidget-ds-amount.json"), u.RawAmount);
+            if (u.RawCost.Length > 0)
+                System.IO.File.WriteAllText(System.IO.Path.Combine(temp, "hwwidget-ds-cost.json"), u.RawCost);
+            Say("raw", $"amount {u.RawAmount.Length} byte · cost {u.RawCost.Length} byte in {temp}");
+        }
+        catch (Exception ex) { Say("esito", "FALLITO: " + ex.Message); Environment.ExitCode = 1; }
+        Console.Out.Write(Log.ToString());
+        try
+        {
+            System.IO.File.WriteAllText(
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "hwwidget-dstest.txt"), Log.ToString());
+        }
+        catch { }
+    }
+
     /// <summary>Costruisce due widget veri: il primo viene spostato e ridimensionato e poi
     /// chiuso (che è il momento in cui salva), il secondo deve riaprire esattamente nello
     /// stesso rettangolo, sullo stesso monitor.</summary>

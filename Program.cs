@@ -12,6 +12,8 @@ static class Program
     {
         if (args.Length > 0 && args[0] == "--selftest") { SelfTest.Run(); return; }
         if (args.Length > 0 && args[0] == "--updatetest") { SelfTest.UpdateDownloadTest(); return; }
+        if (args.Length > 0 && args[0] == "--dstest") { SelfTest.DeepSeekTest(); return; }
+        if (args.Length > 0 && args[0] == "--dslogin-test") { SelfTest.DsLoginTest(); return; }
         // aggiornamento senza interfaccia: prova il giro completo release → installazione
         if (args.Contains("--update-silent"))
         {

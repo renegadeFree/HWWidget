@@ -66,6 +66,23 @@ sealed class AiKeys
         }
         catch { }
     }
+
+    /// <summary>Accetta quello che si copia dal browser in qualunque forma: con virgolette,
+    /// oppure l'intero oggetto di localStorage (`{"value":"eyJ..."}`).</summary>
+    public static string Normalize(string token)
+    {
+        string t = token.Trim().Trim('"', '\'');
+        if (!t.StartsWith('{')) return t;
+        try
+        {
+            using var doc = JsonDocument.Parse(t);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.String)
+                return v.GetString()?.Trim() ?? t;
+        }
+        catch { }
+        return t;
+    }
 }
 
 /// <summary>DPAPI wrappers (no extra package: crypt32 via P/Invoke).</summary>
@@ -293,8 +310,12 @@ sealed class DeepSeekUsage
     public List<DsDay> Days = new();
     public string Status = "";
     public DateTime FetchedUtc;
+    /// <summary>Risposte grezze dell'ultima lettura (diagnostica: --dstest).</summary>
+    public string RawAmount = "", RawCost = "";
 
     public bool HasUsage => Models.Count > 0 || Days.Count > 0;
+    /// <summary>true quando l'endpoint interno ha accettato il token (usato per validarlo).</summary>
+    public bool UsageOk;
     public string HitRate => Days.Count == 0 && Models.Count == 0 ? ""
         : AiUsage.Tokens(Models.Sum(m => m.Hit) + Models.Sum(m => m.Miss) + Models.Sum(m => m.Out));
 
@@ -328,12 +349,21 @@ sealed class DeepSeekUsage
         {
             try
             {
+                if (usageToken == apiKey)
+                    throw new Exception("nel campo del token di utilizzo c'è la API key: serve il token di sessione di " +
+                                        "platform.deepseek.com (F12 → JSON.parse(localStorage.userToken).value)");
+                if (usageToken.Length < 80)
+                    problems.Add($"il token di utilizzo è di {usageToken.Length} caratteri: quello del sito è molto più " +
+                                 "lungo e inizia con eyJ");
                 var now = DateTime.Now;
-                string amount = await GetAsync(
+                u.RawAmount = await GetAsync(
                     $"https://platform.deepseek.com/api/v0/usage/amount?month={now.Month}&year={now.Year}", usageToken, false);
-                string cost = await GetAsync(
+                u.RawCost = await GetAsync(
                     $"https://platform.deepseek.com/api/v0/usage/cost?month={now.Month}&year={now.Year}", usageToken, false);
-                Parse(amount, cost, u, now);
+                // la piattaforma risponde 200 anche quando rifiuta il token: l'errore è nel corpo
+                string? err = BodyError(u.RawAmount) ?? BodyError(u.RawCost);
+                if (err != null) problems.Add(err);
+                else { Parse(u.RawAmount, u.RawCost, u, now); u.UsageOk = true; }
             }
             catch (Exception ex) { problems.Add("uso: " + ex.Message); }
         }
@@ -354,9 +384,54 @@ sealed class DeepSeekUsage
             req.Headers.TryAddWithoutValidation("User-Agent", Ua);
         }
         using var res = await Http.SendAsync(req);
-        if (!res.IsSuccessStatusCode) throw new Exception($"HTTP {(int)res.StatusCode}");
-        return await res.Content.ReadAsStringAsync();
+        string body = await res.Content.ReadAsStringAsync();
+        // l'API risponde sempre JSON: il motivo vero sta in "msg" / "error.message", non nel codice HTTP
+        if (!res.IsSuccessStatusCode) throw new Exception(Message(body, (int)res.StatusCode));
+        return body;
     }
+
+    static string Message(string body, int status)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                if (root.TryGetProperty("msg", out var m) && m.ValueKind == JsonValueKind.String)
+                    return Friendly(m.GetString() ?? "");
+                if (root.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.Object
+                    && e.TryGetProperty("message", out var em) && em.ValueKind == JsonValueKind.String)
+                    return Friendly(em.GetString() ?? "");
+            }
+        }
+        catch { }
+        return $"HTTP {status}";
+    }
+
+    /// <summary>Errore annidato nel corpo ({"code":40003,"msg":"...","data":null}) oppure null.</summary>
+    static string? BodyError(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return null;
+            if (!root.TryGetProperty("code", out var code) || code.ValueKind != JsonValueKind.Number
+                || code.GetInt32() == 0) return null;
+            string msg = root.TryGetProperty("msg", out var m) && m.ValueKind == JsonValueKind.String
+                ? m.GetString() ?? "" : "";
+            return msg.Length > 0 ? Friendly(msg) : $"errore API {code.GetInt32()}";
+        }
+        catch { return null; }
+    }
+
+    static string Friendly(string msg)
+        => msg.Contains("invalid token", StringComparison.OrdinalIgnoreCase)
+           || msg.Contains("Authorization Failed", StringComparison.OrdinalIgnoreCase)
+            ? "token di utilizzo non valido o scaduto: riprendilo da platform.deepseek.com (F12 → " +
+              "JSON.parse(localStorage.userToken).value)"
+            : msg;
 
     static string Money(double v, string currency)
         => v.ToString("0.00", CultureInfo.CurrentCulture) + " " + (currency.Length > 0 ? currency : "$");
@@ -369,11 +444,13 @@ sealed class DeepSeekUsage
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object) return (null, null, null, "", false);
         bool available = root.TryGetProperty("is_available", out var av) && av.ValueKind == JsonValueKind.True;
         if (!root.TryGetProperty("balance_infos", out var infos) || infos.ValueKind != JsonValueKind.Array
             || infos.GetArrayLength() == 0)
             return (null, null, null, "", available);
         var first = infos[0];
+        if (first.ValueKind != JsonValueKind.Object) return (null, null, null, "", available);
         double? total = first.TryGetProperty("total_balance", out var t) ? Num(t) : null;
         double? topped = first.TryGetProperty("topped_up_balance", out var tp) ? Num(tp) : null;
         double? granted = first.TryGetProperty("granted_balance", out var g) ? Num(g) : null;
@@ -510,7 +587,8 @@ sealed class DeepSeekUsage
     static bool Data(JsonElement root, out JsonElement biz)
     {
         biz = default;
-        if (!root.TryGetProperty("data", out var data)) return false;
+        if (root.ValueKind != JsonValueKind.Object) return false;
+        if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object) return false;
         if (!data.TryGetProperty("biz_data", out var b)) return false;
         if (b.ValueKind == JsonValueKind.Array)
         {
@@ -524,6 +602,7 @@ sealed class DeepSeekUsage
 
     static (string model, List<(string type, double amount)> usage) ModelUsage(JsonElement m)
     {
+        if (m.ValueKind != JsonValueKind.Object) return ("", new List<(string, double)>());
         string model = m.TryGetProperty("model", out var mv) ? mv.GetString() ?? "" : "";
         var usage = new List<(string, double)>();
         if (m.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Array)
@@ -533,10 +612,10 @@ sealed class DeepSeekUsage
     }
 
     static bool IsRequest(JsonElement e)
-        => e.TryGetProperty("type", out var tv) && tv.GetString() == "REQUEST";
+        => e.ValueKind == JsonValueKind.Object && e.TryGetProperty("type", out var tv) && tv.GetString() == "REQUEST";
 
     static double Amount(JsonElement e)
-        => e.TryGetProperty("amount", out var a) ? Num(a) ?? 0 : 0;
+        => e.ValueKind == JsonValueKind.Object && e.TryGetProperty("amount", out var a) ? Num(a) ?? 0 : 0;
 
     static double? Num(JsonElement e) => e.ValueKind switch
     {

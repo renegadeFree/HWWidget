@@ -146,6 +146,10 @@ internal sealed class WidgetView
             Padding = pad,
             Margin = margin,
         };
+        // maschera sugli angoli tondi: i grafici arrivano ai bordi della card ma non
+        // devono spuntare fuori dagli angoli
+        b.SizeChanged += (_, e) =>
+            b.Clip = new RectangleGeometry(new Rect(0, 0, e.NewSize.Width, e.NewSize.Height), radius, radius);
         return b;
     }
 
@@ -401,6 +405,9 @@ internal sealed class WidgetView
     double CardPad => 12 * _u;
     /// <summary>Margine sotto l'ultima riga di una card.</summary>
     double CardBottom => 4 * _u * _rs;
+    /// <summary>Distanza del grafico dal bordo inferiore della card: senza, la linea di base
+    /// finisce a contatto con il bordo del box.</summary>
+    const double GraphClearance = 3;
 
     /// <summary>Green under 60%, amber to 85%, red above — temperatures shift the bands.</summary>
     SolidColorBrush Level(double value, bool isTemp)
@@ -687,7 +694,8 @@ internal sealed class WidgetView
             legend.Visibility = spark.Visibility;
             caption.Visibility = spark.Visibility;
             if (d.Days.Count > 0) range.Text = $"{d.Days[0].Label} – {d.Days[^1].Label}";
-            hint.Text = d.HasUsage ? "" : d.Status;
+            // nel widget una riga corta: i dettagli (e il motivo) stanno nell'hub
+            hint.Text = d.HasUsage ? "" : "token di utilizzo non impostato o non valido · Hub → Impostazioni app";
             hint.Visibility = hint.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             for (int i = 0; i < slots.Count; i++)
             {
@@ -872,7 +880,7 @@ internal sealed class WidgetView
             graph = Graph($"panel.{key}", new SolidColorBrush(_p.Ok), Brushes.Transparent, isTemp ? 0 : 100, 24 * _u * _c.GraphHeightScale);
             // il grafico arriva ai bordi del box: ai lati sempre, in basso solo nell'ultima
             // riga (dove sotto c'è il bordo della card); il pieno sfuma verso i bordi
-            graph.Margin = new Thickness(-CardPad, 6 * _u * _rs, -CardPad, isLast ? -CardBottom : 0);
+            graph.Margin = new Thickness(-CardPad, 6 * _u * _rs, -CardPad, isLast ? GraphClearance : 0);
             inner.Children.Add(graph);
         }
 
@@ -922,10 +930,10 @@ internal sealed class WidgetView
         if (graphs)
         {
             graphLeft = Graph($"panel.{element}.l", colorLeft, Brushes.Transparent, 0, 22 * _u * _c.GraphHeightScale);
-            graphLeft.Margin = new Thickness(-CardPad, 5 * _u * _rs, 0, -CardBottom);
+            graphLeft.Margin = new Thickness(-CardPad, 5 * _u * _rs, 0, GraphClearance);
             cellLeft.Children.Add(graphLeft);
             graphRight = Graph($"panel.{element}.r", colorRight, Brushes.Transparent, 0, 22 * _u * _c.GraphHeightScale);
-            graphRight.Margin = new Thickness(0, 5 * _u * _rs, -CardPad, -CardBottom);
+            graphRight.Margin = new Thickness(0, 5 * _u * _rs, -CardPad, GraphClearance);
             cellRight.Children.Add(graphRight);
         }
 

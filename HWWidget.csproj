@@ -10,13 +10,14 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <AssemblyName>HWWidget</AssemblyName>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <RootNamespace>HWWidget</RootNamespace>
     <PlatformTarget>x64</PlatformTarget>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <StartupObject>HWWidget.Program</StartupObject>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
     <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
   <ItemGroup>

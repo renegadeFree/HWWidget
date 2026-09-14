@@ -310,11 +310,13 @@ sealed class ControlHub : Window
             "token totali di ChatGPT e Claude → letti dai log locali delle rispettive CLI, senza chiavi. " +
             "I limiti di reset degli abbonamenti (ChatGPT/Claude) non sono esposti da nessuna API pubblica.",
             new TextBlock { Text = "", Width = 0 }));
-        _content.Children.Add(CardFull("\uE9D2", "Token di utilizzo DeepSeek (solo per il widget DeepSeek)",
-            "Uso, spesa e cache hit esatti non sono nell'API ufficiale (che espone solo il saldo): si leggono dalle API " +
-            "interne di platform.deepseek.com, le stesse della dashboard web. Serve il token di sessione del sito, che scade: " +
-            "apri platform.deepseek.com nel browser, accedi, premi F12 → Console, incolla " +
-            "JSON.parse(localStorage.userToken).value e copia la stringa restituita.",
+        _content.Children.Add(CardFull("\uE9D2", "Token di utilizzo DeepSeek (per token, spesa e cache hit)",
+            "L'API ufficiale DeepSeek espone solo il saldo: token usati, spesa e cache hit si leggono dalle API interne " +
+            "di platform.deepseek.com, le stesse della dashboard web, e servono il token di sessione del sito (NON la API key). " +
+            "Come prenderlo: apri platform.deepseek.com nel browser e accedi → F12 → scheda Console → incolla " +
+            "JSON.parse(localStorage.userToken).value e premi Invio → copia la stringa restituita (è lunga, inizia con eyJ). " +
+            "Incollala nel campo \"Token di utilizzo DeepSeek\", premi Salva chiavi e poi Verifica. Il token scade: se i dati " +
+            "tornano n/d, ripeti la procedura.",
             new TextBlock { Text = "", Width = 0 }));
         (FrameworkElement deepSeekRow, PasswordBox deepSeek) = KeyRow("DeepSeek API key", keys.DeepSeek);
         (FrameworkElement deepSeekUsageRow, PasswordBox deepSeekUsage) = KeyRow("Token di utilizzo DeepSeek", keys.DeepSeekUsage);
@@ -329,7 +331,7 @@ sealed class ControlHub : Window
         saveRow.Children.Add(TextButton("Salva chiavi", () =>
         {
             keys.DeepSeek = deepSeek.Password.Trim();
-            keys.DeepSeekUsage = deepSeekUsage.Password.Trim();
+            keys.DeepSeekUsage = AiKeys.Normalize(deepSeekUsage.Password);
             keys.OpenAi = openAi.Password.Trim();
             keys.Anthropic = anthropic.Password.Trim();
             keys.GitHub = github.Password.Trim();
@@ -338,9 +340,40 @@ sealed class ControlHub : Window
             Rebuild();
         }, accent: true));
         saveRow.Children.Add(TextButton("Rileggi ora", () => _ = SensorHub.RefreshAiAsync()));
+        var dsStatus = new TextBlock
+        {
+            Style = (Style)Resources["HubCardDesc"],
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0),
+            Foreground = (Brush)Resources["TextSecondary"],
+        };
+        var verifyRow = new WrapPanel();
+        verifyRow.Children.Add(TextButton("Accedi e prendi il token (automatico)", () =>
+        {
+            var w = new DeepSeekLogin();
+            w.Closed += (_, _) => { keys.DeepSeekUsage = AiKeys.Load().DeepSeekUsage; deepSeekUsage.Password = keys.DeepSeekUsage; };
+            w.Show();
+            w.Activate();
+        }, accent: true));
+        verifyRow.Children.Add(TextButton("Verifica token DeepSeek", () =>
+        {
+            keys.DeepSeek = deepSeek.Password.Trim();
+            keys.DeepSeekUsage = AiKeys.Normalize(deepSeekUsage.Password);
+            keys.Save();
+            dsStatus.Text = "Verifica in corso…";
+            _ = Task.Run(async () =>
+            {
+                var r = await DeepSeekUsage.FetchAsync(keys.DeepSeek, keys.DeepSeekUsage);
+                Dispatcher.Invoke(() => dsStatus.Text = r.Status.Length > 0
+                    ? "⚠ " + r.Status
+                    : $"✓ ok · saldo {r.Balance} · {r.Models.Count} modelli · mese {r.MonthCost} · {r.Days.Count} giorni");
+            });
+        }));
+        foreach (var b in verifyRow.Children.OfType<Button>())
+            if (b.Content?.ToString()?.StartsWith("Verifica") == true) b.Margin = new Thickness(8, 0, 0, 0);
         // CardFull: con la card normale i campi stretti schiacciano la descrizione in verticale
         _content.Children.Add(CardFull("\uE72C", "Chiavi", "Salvate cifrate (DPAPI) in " + Path.Combine(WidgetConfig.Dir, "keys.dat"),
-            NewColumn(deepSeekRow, deepSeekUsageRow, openAiRow, anthropicRow, githubRow, interval, saveRow)));
+            NewColumn(deepSeekRow, deepSeekUsageRow, openAiRow, anthropicRow, githubRow, interval, saveRow, verifyRow, dsStatus)));
 
         SubTitle("Aggiornamenti");
         var updateInfo = new TextBlock

@@ -42,10 +42,15 @@ e un hub di controllo in stile Impostazioni di Windows.
   saldo e disponibilità, costo di oggi e del mese, un riquadro per modello (token, richieste,
   cache hit, costo) e il grafico giornaliero a barre impilate (cache hit / miss / output).
   Saldo dall'API ufficiale; uso, spesa e cache hit dalle API interne di
-  `platform.deepseek.com` (l'API ufficiale non li espone). Serve il token di sessione del
-  sito: apri platform.deepseek.com, F12 → Console, `JSON.parse(localStorage.userToken).value`,
-  poi incollalo in *Hub → Impostazioni app → Chiavi* (voce "Token di utilizzo DeepSeek").
-  Il token scade: se i dati diventano `n/d`, ripetilo.
+  `platform.deepseek.com` (l'API ufficiale non li espone), con il token di sessione del sito.
+  Per prenderlo: *Hub → Impostazioni app → Chiavi → "Accedi e prendi il token (automatico)"*
+  apre platform.deepseek.com dentro l'app e lo salva da solo (come il monitor di riferimento:
+  WebView2 + script che legge `localStorage.userToken` e l'header `Authorization` delle
+  chiamate). Il pulsante *Metodo manuale* spiega in alternativa il copia-incolla da
+  F12 → Console. Il token scade: se i dati tornano `n/d`, ripeti (il login resta salvato).
+
+  Diagnostica: `HWWidget.exe --dstest` (saldo e uso, con le risposte grezze salvate in %TEMP%)
+  e `--dslogin-test` (catena di acquisizione del token).
 
   ![Widget DeepSeek](docs/deepseek.png)
 
@@ -60,6 +65,7 @@ Program.cs          AppController, tray icon, istanze multiple
 MainWindow.xaml*    finestra widget (senza cornice, ridimensionamento a mano)
 WidgetView.cs       i 5 layout e il binding dei dati
 Sparkline.cs        grafici (ring buffer condiviso, 4 stili)
+DeepSeekLogin.cs    accesso a platform.deepseek.com in WebView2 per il token di utilizzo
 Sensors.cs          sampler: rete, CPU, RAM, disco, GPU (NVML), accent blur, PDH
 WidgetConfig.cs     configurazione per widget + palette chiaro/scuro
 ControlHub.cs       hub di controllo in stile impostazioni
@@ -75,7 +81,8 @@ Setup/              installer standalone (progetto separato)
 dotnet build -c Release                     # app
 dotnet run --project . -- --selftest        # controlli dei sensori e delle configurazioni
                                             # (include posizione/dimensioni e sezione AI)
-dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o dist
+dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true -o dist      # serve anche a WebView2
 ```
 
 Installer standalone (include il runtime, nessun prerequisito sul PC di destinazione):
