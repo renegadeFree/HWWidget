@@ -226,6 +226,10 @@ static class SelfTest
             SavePng(dsView, 340, png);
             Say("deepseek-render", $"sezione DeepSeek disegnata in {png} ({dsView.BoundCount} bind)");
             Check(HasRefreshButton(dsView.Root), "manca il pulsante di aggiornamento nella sezione DeepSeek");
+            // stessa sezione in una finestra più piccola: si rimpicciolisce, non si taglia
+            var dsSmall = new WidgetView(dsCfg, Palette.For("dark"), new Dictionary<string, Series>(), 340, 0.62);
+            dsSmall.Bind(new Metrics { Ai = new AiSnapshot { Deep = ds } });
+            SavePng(dsSmall, 340, System.IO.Path.Combine(System.IO.Path.GetTempPath(), "hwwidget-deepseek-fit.png"));
             foreach (var sp in Sparklines(dsView.Root))
             {
                 Check(Math.Abs(sp.ActualHeight - sp.Height) < 1, "il grafico DeepSeek non rispetta l'altezza richiesta");
@@ -436,6 +440,36 @@ static class SelfTest
             win.Close();
             Pump();
             DeleteConfig(id);
+
+            // widget DeepSeek (solo la sua sezione) rimpicciolito: prima veniva tagliato in basso
+            var dsWin = new MainWindow(new WidgetConfig
+            {
+                Id = "selftest-dswin", Layout = "panelgraph", Width = 328, Height = 700,
+                ShowNet = false, ShowCpu = false, ShowGpu = false, ShowRam = false, ShowDisk = false,
+                ShowAi = false, ShowDs = true,
+            }.Sanitized());
+            dsWin.Show();
+            Pump();
+            foreach (double hh in new[] { 700.0, 420.0 })
+            {
+                dsWin.Width = 328;
+                dsWin.Height = hh;
+                Pump();
+                System.Threading.Thread.Sleep(60);
+                Pump();
+                dsWin.Rebuild();
+                double inner = dsWin.InnerHeight();
+                var root = (System.Windows.FrameworkElement)dsWin.Host.Content;
+                root.Measure(new System.Windows.Size(Math.Max(60, dsWin.Host.ActualWidth), double.PositiveInfinity));
+                double content = root.DesiredSize.Height;
+                Say("fit-ds", $"DeepSeek 328×{hh:0} → contenuto {content:0} / {inner:0} " +
+                              $"(scala {dsWin.ProbeFit:0.000})");
+                Check(content <= Math.Max(inner, dsWin.ProbeAvail) + 2,
+                      $"widget DeepSeek {hh:0} px: contenuto {content:0} oltre la finestra {inner:0}");
+            }
+            dsWin.Close();
+            Pump();
+            DeleteConfig("selftest-dswin");
 
             // ingrandendo i contenuti cresce la finestra (non si rimpicciolisce il widget)
             var growCfg = new WidgetConfig { Id = "selftest-grow", Width = 328, Height = 420,
