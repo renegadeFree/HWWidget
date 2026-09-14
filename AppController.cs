@@ -92,6 +92,11 @@ sealed class AppController : IDisposable
                 c.ShowAi = true;
                 c.Layout = "panelgraph";
                 break;
+            case "ds":
+                c.ShowNet = c.ShowCpu = c.ShowGpu = c.ShowRam = c.ShowDisk = false;
+                c.ShowDs = true;
+                c.Layout = "panelgraph";
+                break;
         }
         c.Sanitized().Save();
         Open(c);
@@ -332,6 +337,7 @@ sealed class TrayIcon : IDisposable
         nuovo.Items.Add(Leaf("Solo RAM", () => _app.NewWidget("ram")));
         nuovo.Items.Add(Leaf("Solo rete", () => _app.NewWidget("net")));
         nuovo.Items.Add(Leaf("CPU + GPU", () => _app.NewWidget("cpugpu")));
+        nuovo.Items.Add(Leaf("Solo DeepSeek", () => _app.NewWidget("ds")));
 
         var startup = new MenuItem { Header = "Avvia con Windows", IsCheckable = true, IsChecked = _app.StartupEnabled };
         startup.Click += (_, _) => _app.SetStartup(startup.IsChecked);

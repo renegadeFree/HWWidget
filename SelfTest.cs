@@ -196,6 +196,56 @@ static class SelfTest
             Check(texts.Any(t => t.Contains("13,00")), "budget rimasto non calcolato: " + string.Join(" | ", texts));
             Say("ai-budget", $"budget 25 $ − speso 12 $ = {texts.First(t => t.Contains("13,00"))}");
 
+            // --- DeepSeek: uso e spesa del mese (API interne della piattaforma) ---
+            var ds = new DeepSeekUsage { Currency = "CNY", Available = true, Balance = "877,70 CNY" };
+            DeepSeekUsage.Parse(DsAmountSample, DsCostSample, ds, new DateTime(2026, 9, 1));
+            Check(ds.Models.Count == 2, $"modelli DeepSeek: {ds.Models.Count} invece di 2");
+            Check(Math.Abs(ds.Models[0].Tokens - 325_000_000) < 1, $"token DeepSeek {ds.Models[0].Tokens}");
+            Check(Math.Abs(ds.Models[0].Requests - 6384) < 1, $"richieste DeepSeek {ds.Models[0].Requests}");
+            Check(Math.Abs(ds.Models[0].HitPct - 92.3) < 0.2, $"cache hit DeepSeek {ds.Models[0].HitPct:0.0}%");
+            Check(Math.Abs(ds.MonthValue - 14.15) < 0.001, $"spesa del mese DeepSeek {ds.MonthValue}");
+            Check(ds.Days.Count == 2 && Math.Abs(ds.Days[1].Hit - 2_000_000) < 1, "token per giorno DeepSeek");
+            Check(Math.Abs(ds.Days[0].Cost - 1.50) < 0.001, $"costo del giorno DeepSeek {ds.Days[0].Cost}");
+            Check(ds.Currency == "CNY" && ds.Available, "valuta/disponibilità DeepSeek");
+            ds.TodayCost = "0,60 CNY";                       // solo per il disegno di controllo
+            Say("deepseek", $"2 modelli ({string.Join(", ", ds.Models.Select(m => $"{m.Name} {AiUsage.Tokens(m.Tokens)} · {m.HitPct:0}% hit · {m.Cost:0.00}"))}) · " +
+                           $"mese {ds.MonthValue:0.00} {ds.Currency} · {ds.Days.Count} giorni · saldo {ds.Balance}");
+
+            // rendering della sezione DeepSeek per il controllo a occhio
+            var dsCfg = new WidgetConfig
+            {
+                Layout = "panelgraph", ShowNet = false, ShowCpu = false, ShowGpu = false, ShowRam = false,
+                ShowDisk = false, ShowAi = false, ShowDs = true,
+            }.Sanitized();
+            var dsView = new WidgetView(dsCfg, Palette.For("dark"), new Dictionary<string, Series>(), 340);
+            dsView.Bind(new Metrics { Ai = new AiSnapshot { Deep = ds } });
+            string png = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "hwwidget-deepseek.png");
+            SavePng(dsView, 340, png);
+            Say("deepseek-render", $"sezione DeepSeek disegnata in {png} ({dsView.BoundCount} bind)");
+            foreach (var sp in Sparklines(dsView.Root))
+            {
+                Check(Math.Abs(sp.ActualHeight - sp.Height) < 1, "il grafico DeepSeek non rispetta l'altezza richiesta");
+                Check(sp.Count == 2, $"giorni nel grafico DeepSeek: {sp.Count} invece di 2");
+                Say("deepseek-spark", $"grafico {sp.ActualWidth:0}×{sp.ActualHeight:0} con {sp.Count} giorni impilati");
+            }
+
+            // pannello completo (per il controllo a occhio di spaziature e sfumature)
+            var full = new WidgetView(new WidgetConfig { Layout = "panelgraph" }, Palette.For("dark"),
+                                      new Dictionary<string, Series>(), 340);
+            var rnd = new Random(7);
+            for (int i = 0; i < 90; i++)
+                full.Bind(new Metrics
+                {
+                    GpuOk = true, GpuUtil = 20 + rnd.Next(50), TempC = 45 + rnd.Next(15),
+                    VramUsed = 3 + rnd.Next(6), VramTotal = 12, Watts = 180, WattsLimit = 370,
+                    CpuUsage = 10 + rnd.Next(40), CpuMhz = 4401, CpuBaseMhz = 4401,
+                    RamPct = 30 + rnd.Next(20), RamUsed = 24, RamTotal = 64, RamSpeed = "6000 MT/s",
+                    DiskRead = 1e6 * rnd.Next(20), DiskWrite = 2e6 * rnd.Next(20),
+                    NetDown = 1e6 * rnd.Next(60), NetUp = 1e5 * rnd.Next(50), NetLink = 1e9, NetName = "Ethernet",
+                });
+            SavePng(full, 340, System.IO.Path.Combine(System.IO.Path.GetTempPath(), "hwwidget-panel.png"));
+            Say("panel-render", "pannello completo disegnato in %TEMP%\\hwwidget-panel.png");
+
             Say("config-dir", WidgetConfig.Dir);
 
             // --- AI: parser e log locali ---
@@ -352,11 +402,41 @@ static class SelfTest
         return n;
     }
 
+    static IEnumerable<Sparkline> Sparklines(System.Windows.DependencyObject o)
+    {
+        if (o is Sparkline sp) yield return sp;
+        foreach (var c in System.Windows.LogicalTreeHelper.GetChildren(o))
+            if (c is System.Windows.DependencyObject d)
+                foreach (var x in Sparklines(d)) yield return x;
+    }
+
     static void CollectTexts(System.Windows.DependencyObject o, List<string> into)
     {
         if (o is System.Windows.Controls.TextBlock t) into.Add(t.Text);
         foreach (var c in System.Windows.LogicalTreeHelper.GetChildren(o))
             if (c is System.Windows.DependencyObject d) CollectTexts(d, into);
+    }
+
+    /// <summary>Disegna la vista su sfondo scuro e la salva in PNG (controllo visivo).</summary>
+    static void SavePng(WidgetView view, double width, string path)
+    {
+        var host = new System.Windows.Controls.Border
+        {
+            Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x1A, 0x1A, 0x1E)),
+            Padding = new System.Windows.Thickness(12, 10, 12, 12),
+            Child = view.Root,
+        };
+        host.Measure(new System.Windows.Size(width, double.PositiveInfinity));
+        host.Arrange(new System.Windows.Rect(0, 0, width, host.DesiredSize.Height));
+        host.UpdateLayout();
+        var bmp = new System.Windows.Media.Imaging.RenderTargetBitmap(
+            (int)Math.Ceiling(width), (int)Math.Ceiling(host.DesiredSize.Height), 96, 96,
+            System.Windows.Media.PixelFormats.Pbgra32);
+        bmp.Render(host);
+        var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bmp));
+        using var fs = System.IO.File.Create(path);
+        enc.Save(fs);
     }
 
     /// <summary>Svuota la coda del dispatcher fino alle operazioni inattive (Layout/Loaded
@@ -400,4 +480,43 @@ static class SelfTest
     {
         if (!ok) throw new Exception(msg);
     }
+
+    // JSON di esempio con la struttura delle API interne DeepSeek (platform.deepseek.com),
+    // la stessa che usa il monitor di riferimento Joyi-code/DeepSeekMonitorWindows
+    const string DsAmountSample = """
+{"data":{"biz_data":{
+ "total":[
+  {"model":"deepseek-chat","usage":[
+    {"type":"REQUEST","amount":"6384"},
+    {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"300000000"},
+    {"type":"PROMPT_CACHE_MISS_TOKEN","amount":"20000000"},
+    {"type":"RESPONSE_TOKEN","amount":"5000000"}]},
+  {"model":"deepseek-reasoner","usage":[
+    {"type":"REQUEST","amount":"112"},
+    {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"10000000"},
+    {"type":"PROMPT_CACHE_MISS_TOKEN","amount":"1000000"},
+    {"type":"RESPONSE_TOKEN","amount":"500000"}]}],
+ "days":[
+  {"date":"2026-09-12","data":[{"model":"deepseek-chat","usage":[
+    {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"1000000"},
+    {"type":"PROMPT_CACHE_MISS_TOKEN","amount":"100000"},
+    {"type":"RESPONSE_TOKEN","amount":"50000"}]}]},
+  {"date":"2026-09-13","data":[{"model":"deepseek-chat","usage":[
+    {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"2000000"},
+    {"type":"RESPONSE_TOKEN","amount":"90000"}]}]}]}}}
+""";
+
+    const string DsCostSample = """
+{"data":{"biz_data":[{
+ "total":[
+  {"model":"deepseek-chat","usage":[
+    {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"10.50"},
+    {"type":"RESPONSE_TOKEN","amount":"2.25"}]},
+  {"model":"deepseek-reasoner","usage":[
+    {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"1.00"},
+    {"type":"RESPONSE_TOKEN","amount":"0.40"}]}],
+ "days":[
+  {"date":"2026-09-12","data":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"1.50"}]}]},
+  {"date":"2026-09-13","data":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"2.00"}]}]}]}]}}
+""";
 }

@@ -38,6 +38,8 @@ internal sealed class WidgetConfig
     public bool ShowDisk { get; set; } = true;
     /// <summary>Sezione AI (DeepSeek / ChatGPT / Claude).</summary>
     public bool ShowAi { get; set; }
+    /// <summary>Sezione DeepSeek completa (saldo, uso del mese, modelli, grafico giornaliero).</summary>
+    public bool ShowDs { get; set; }
     public List<string> AiProviders { get; set; } = new() { "deepseek", "openai", "anthropic" };
     /// <summary>Budget mensile per fornitore AI in USD (0 = non impostato). Serve al widget
     /// per calcolare il budget rimasto: le API non espongono un limite di spesa.</summary>
@@ -106,6 +108,7 @@ internal sealed class WidgetConfig
             if (ShowRam) visible.Add("ram");
             if (ShowDisk) visible.Add("disk");
             if (ShowAi) visible.Add("ai");
+            if (ShowDs) visible.Add("ds");
 
             if (Order.Count == 0) return visible;
             var ordered = Order.Where(visible.Contains).ToList();
@@ -224,7 +227,7 @@ internal sealed class WidgetConfig
         foreach (var key in Colors.Keys.ToList())
             if (!IsValidColor(Colors[key])) Colors.Remove(key);
         Order ??= new List<string>();
-        Order = Order.Where(k => k is "net" or "cpu" or "gpu" or "ram" or "disk" or "ai")
+        Order = Order.Where(k => k is "net" or "cpu" or "gpu" or "ram" or "disk" or "ai" or "ds")
                      .Distinct()
                      .ToList();
         AiProviders ??= new List<string>();
@@ -234,7 +237,7 @@ internal sealed class WidgetConfig
             if (p is not ("deepseek" or "openai" or "anthropic")
                 || double.IsNaN(AiBudgets[p]) || AiBudgets[p] < 0 || AiBudgets[p] > 1e6)
                 AiBudgets.Remove(p);
-        if (!ShowNet && !ShowCpu && !ShowGpu && !ShowRam && !ShowDisk && !ShowAi) ShowCpu = true;
+        if (!ShowNet && !ShowCpu && !ShowGpu && !ShowRam && !ShowDisk && !ShowAi && !ShowDs) ShowCpu = true;
         Schema = 1;
         return this;
     }

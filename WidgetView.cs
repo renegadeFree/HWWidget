@@ -99,6 +99,7 @@ internal sealed class WidgetView
         "net" => 2 + (c.ShowSecondary ? 1 : 0),
         "gpu" => 2 + (c.ShowSecondary ? 1 : 0),
         "ai" => Math.Max(1, c.AiProviders.Count) * 4,
+        "ds" => 1 + DsMaxModels * 2 + 3,
         _ => 1 + (c.ShowSecondary ? 1 : 0),
     };
 
@@ -163,6 +164,7 @@ internal sealed class WidgetView
         "gpu" => "GPU",
         "disk" => "DISCO",
         "ai" => "AI",
+        "ds" => "DEEPSEEK",
         _ => "RAM",
     };
     static string ElGlyph(string el) => el switch
@@ -172,6 +174,7 @@ internal sealed class WidgetView
         "gpu" => "\uE7FC",
         "disk" => "\uEDA2",
         "ai" => "\uE945",
+        "ds" => "\uE9D2",
         _ => "\uE964",
     };
 
@@ -239,6 +242,15 @@ internal sealed class WidgetView
                 lines.Add(($"Consumato {AiSpent(p, m)}", 0, "", new SolidColorBrush(_p.NetDown), ""));
                 lines.Add(($"Token {AiTokens(p, m)}", 0, "", new SolidColorBrush(_p.Cpu), ""));
                 return (rimasto, $"Token {AiTokens(p, m)}", 0, lines);
+            }
+            case "ds":
+            {
+                var d = m.Ai.Deep;
+                string bal = d.Balance.Length > 0 ? d.Balance : "n/d";
+                string spent = d.MonthCost.Length > 0 ? d.MonthCost : "n/d";
+                lines.Add(($"Saldo {bal}", 0, "", new SolidColorBrush(DsAccent), ""));
+                lines.Add(($"Speso {spent}", 0, "", new SolidColorBrush(DsHit), ""));
+                return (bal, $"Speso {spent}", 0, lines);
             }
         }
     }
@@ -373,7 +385,22 @@ internal sealed class WidgetView
 
     // ---------- layout: panel (LiteMonitor style: sections, label/value + level bar) ----------
 
-    static readonly string[] PanelOrder = { "cpu", "gpu", "ram", "disk", "net" };
+    static readonly string[] PanelOrder = { "cpu", "gpu", "ram", "disk", "net", "ai", "ds" };
+
+    // colori DeepSeek: accento del brand, poi i tre della legenda del monitor di riferimento
+    static readonly Color DsAccent = Color.FromRgb(0x4D, 0x6B, 0xFE);
+    static readonly Color DsHit = Color.FromRgb(0x30, 0xC4, 0x7A);
+    static readonly Color DsMiss = Color.FromRgb(0xF5, 0x9E, 0x0B);
+    static readonly Color DsOut = Color.FromRgb(0xA8, 0x55, 0xF7);
+    const int DsMaxModels = 3;
+
+    /// <summary>Spazio fra due righe di una sezione (segue la scala righe).</summary>
+    double RowGap => 14 * _u * _rs;
+    /// <summary>Margine interno orizzontale delle card: i grafici lo usano al negativo
+    /// per arrivare ai bordi del box.</summary>
+    double CardPad => 12 * _u;
+    /// <summary>Margine sotto l'ultima riga di una card.</summary>
+    double CardBottom => 4 * _u * _rs;
 
     /// <summary>Green under 60%, amber to 85%, red above — temperatures shift the bands.</summary>
     SolidColorBrush Level(double value, bool isTemp)
@@ -422,7 +449,9 @@ internal sealed class WidgetView
 
     FrameworkElement PanelSection(string el, bool graphs)
     {
-        var section = new StackPanel { Margin = new Thickness(0, 0, 0, 8 * _u * _rs) };
+        // margine di sezione + padding inferiore della card = RowGap: dopo l'ultima riga
+        // di una sezione c'è lo stesso spazio che c'è fra due righe
+        var section = new StackPanel { Margin = new Thickness(0, 0, 0, 10 * _u * _rs) };
 
         // header: icon + name only, no box (as in the reference)
         var headerContent = new StackPanel { Orientation = Orientation.Horizontal };
@@ -447,11 +476,11 @@ internal sealed class WidgetView
                 body.Children.Add(MetricRow($"{el}.use", el, "Uso", m => $"{m.CpuUsage:0.0}%", m => m.CpuUsage, m => m.CpuUsage, graphs, false, true));
                 break;
             case "gpu":
-                body.Children.Add(MetricRow($"{el}.use", el, "Uso", m => m.GpuOk ? $"{m.GpuUtil:0.0}%" : "n/d", m => m.GpuUtil, m => m.GpuUtil, graphs, false, true));
-                body.Children.Add(MetricRow($"{el}.temp", el, "Temp", m => m.GpuOk ? $"{m.TempC:0.0} °C" : "n/d", m => m.TempC, m => m.TempC, graphs, true, true));
+                body.Children.Add(MetricRow($"{el}.use", el, "Uso", m => m.GpuOk ? $"{m.GpuUtil:0.0}%" : "n/d", m => m.GpuUtil, m => m.GpuUtil, graphs, false, false));
+                body.Children.Add(MetricRow($"{el}.temp", el, "Temp", m => m.GpuOk ? $"{m.TempC:0.0} °C" : "n/d", m => m.TempC, m => m.TempC, graphs, true, false));
                 body.Children.Add(MetricRow($"{el}.vram", el, "VRAM", m => m.VramTotal > 0 ? $"{m.VramUsed * 100 / m.VramTotal:0.0}%" : "n/d",
                     m => m.VramTotal > 0 ? m.VramUsed * 100 / m.VramTotal : 0,
-                    m => m.VramTotal > 0 ? m.VramUsed * 100 / m.VramTotal : 0, graphs, false, false));
+                    m => m.VramTotal > 0 ? m.VramUsed * 100 / m.VramTotal : 0, graphs, false, true));
                 break;
             case "ram":
                 body.Children.Add(MetricRow($"{el}.use", el, "Uso", m => $"{m.RamPct:0.0}%", m => m.RamPct, m => m.RamPct, graphs, false, true));
@@ -465,13 +494,17 @@ internal sealed class WidgetView
                 foreach (var row in AiRows())
                     body.Children.Add(row);
                 break;
+            case "ds":
+                foreach (var row in DsRows())
+                    body.Children.Add(row);
+                break;
             default:
                 body.Children.Add(PairRow(el, graphs,
                     ("Upload", m => Rate(m.NetUp), new SolidColorBrush(_p.NetUp), m => m.NetUp),
                     ("Download", m => Rate(m.NetDown), new SolidColorBrush(_p.NetDown), m => m.NetDown)));
                 break;
         }
-        var card = Surface(9 * _u, _p.Card, new Thickness(12 * _u, 9 * _u * _rs, 12 * _u, 10 * _u * _rs), new Thickness(0));
+        var card = Surface(9 * _u, _p.Card, new Thickness(CardPad, 9 * _u * _rs, CardPad, CardBottom), new Thickness(0));
         card.Child = body;
         section.Children.Add(card);
         return section;
@@ -546,6 +579,241 @@ internal sealed class WidgetView
 
     internal static string Money(double v) => v.ToString("0.00", CultureInfo.CurrentCulture) + " $";
 
+    /// <summary>Sezione DeepSeek completa, come il monitor di riferimento: saldo con
+    /// disponibilità, costo di oggi e del mese, un riquadro per modello (token, richieste,
+    /// cache hit, costo) e il grafico giornaliero impilato con la legenda.</summary>
+    IEnumerable<FrameworkElement> DsRows()
+    {
+        var accent = _c.ColorOf("ds") != "auto" ? BrushFromHex(_c.ColorOf("ds")) : (Brush)new SolidColorBrush(DsAccent);
+
+        var head = new Grid();
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var label = Txt("Saldo", 10.5 * _u, new SolidColorBrush(_p.TextDim));
+        label.VerticalAlignment = VerticalAlignment.Center;
+        var chipText = Txt("—", 9.5 * _u, new SolidColorBrush(DsHit), bold: true);
+        var chip = new Border
+        {
+            CornerRadius = new CornerRadius(8 * _u),
+            Padding = new Thickness(8 * _u, 2 * _u, 8 * _u, 2 * _u),
+            Background = new SolidColorBrush(Color.FromArgb(0x2E, DsHit.R, DsHit.G, DsHit.B)),
+            Child = chipText,
+        };
+        Grid.SetColumn(label, 0);
+        Grid.SetColumn(chip, 1);
+        head.Children.Add(label);
+        head.Children.Add(chip);
+
+        var balance = Txt("—", 20 * _u, accent, bold: true, mono: true);
+        balance.Margin = new Thickness(0, 2 * _u * _rs, 0, 5 * _u * _rs);
+        var pair = new Grid();
+        pair.ColumnDefinitions.Add(Star(1));
+        pair.ColumnDefinitions.Add(Star(1));
+        var (todayBox, todayText) = DsStat("Oggi", accent);
+        var (monthBox, monthText) = DsStat("Mese", accent);
+        monthBox.Margin = new Thickness(6 * _u, 0, 0, 0);
+        Grid.SetColumn(todayBox, 0);
+        Grid.SetColumn(monthBox, 1);
+        pair.Children.Add(todayBox);
+        pair.Children.Add(monthBox);
+
+        _binds.Add(m =>
+        {
+            var d = m.Ai.Deep;
+            balance.Text = d.Balance.Length > 0 ? d.Balance : "n/d";
+            chip.Visibility = d.Balance.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            var tone = d.Available ? DsHit : _p.Warn;
+            chip.Background = new SolidColorBrush(Color.FromArgb(0x2E, tone.R, tone.G, tone.B));
+            chipText.Text = d.Available ? "disponibile" : "non disponibile";
+            chipText.Foreground = new SolidColorBrush(tone);
+            todayText.Text = d.TodayCost.Length > 0 ? d.TodayCost : "n/d";
+            monthText.Text = d.MonthCost.Length > 0 ? d.MonthCost : "n/d";
+        });
+
+        var rows = new List<FrameworkElement> { head, balance, pair };
+        var slots = new List<DsSlot>();
+        for (int i = 0; i < DsMaxModels; i++)
+        {
+            var slot = DsModelRow(accent);
+            slots.Add(slot);
+            rows.Add(slot.Box);
+        }
+
+        // grafico giornaliero: barre impilate (cache hit, miss, output) come nel riferimento
+        var caption = new Grid { Margin = new Thickness(0, 9 * _u * _rs, 0, 0) };
+        caption.Visibility = Visibility.Collapsed;
+        caption.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        caption.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        caption.Children.Add(Txt("Consumo giornaliero", 10.5 * _u, new SolidColorBrush(_p.TextDim)));
+        var range = Txt("", 10 * _u, new SolidColorBrush(_p.TextDim), align: TextAlignment.Right);
+        Grid.SetColumn(range, 1);
+        caption.Children.Add(range);
+        rows.Add(caption);
+
+        var spark = new Sparkline
+        {
+            Series = Shared("ds.days"),
+            WindowSamples = 30,
+            Stacked = true,
+            VMax = 0,                       // scala automatica sulla somma dei tre valori
+            GraphStyle = GraphStyle.Bars,
+            StrokeA = new SolidColorBrush(DsHit),
+            StrokeB = new SolidColorBrush(DsMiss),
+            StrokeC = new SolidColorBrush(DsOut),
+            Height = 44 * _u * _c.GraphHeightScale,
+            Margin = new Thickness(-CardPad, 5 * _u * _rs, -CardPad, 0),
+            Visibility = Visibility.Collapsed,
+        };
+        rows.Add(spark);
+        var legend = DsLegend();
+        legend.Visibility = Visibility.Collapsed;
+        rows.Add(legend);
+        var hint = Txt("", 9.5 * _u, new SolidColorBrush(_p.TextDim));
+        hint.TextWrapping = TextWrapping.Wrap;
+        hint.Margin = new Thickness(0, 6 * _u * _rs, 0, 0);
+        rows.Add(hint);
+
+        DateTime? seen = null;
+        _binds.Add(m =>
+        {
+            var d = m.Ai.Deep;
+            if (seen == d.FetchedUtc) return;
+            seen = d.FetchedUtc;
+            var series = Shared("ds.days");
+            series.Clear();
+            foreach (var day in d.Days) series.Push(day.Hit, day.Miss, day.Out);
+            spark.WindowSamples = Math.Max(2, d.Days.Count);
+            spark.Visibility = d.Days.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            legend.Visibility = spark.Visibility;
+            caption.Visibility = spark.Visibility;
+            if (d.Days.Count > 0) range.Text = $"{d.Days[0].Label} – {d.Days[^1].Label}";
+            hint.Text = d.HasUsage ? "" : d.Status;
+            hint.Visibility = hint.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            for (int i = 0; i < slots.Count; i++)
+            {
+                var s = slots[i];
+                if (i >= d.Models.Count) { s.Box.Visibility = Visibility.Collapsed; continue; }
+                var model = d.Models[i];
+                s.Box.Visibility = Visibility.Visible;
+                s.Name.Text = model.Name;
+                s.Cost.Text = DeepSeekUsage.Text(model.Cost, d.Currency);
+                s.Tokens.Text = AiUsage.Tokens(model.Tokens);
+                s.Requests.Text = model.Requests.ToString("N0", CultureInfo.CurrentCulture);
+                double pct = Math.Clamp(model.HitPct, 0, 100);
+                s.Percent.Text = $"{pct:0}%";
+                double w = s.Bar.ActualWidth > 2 ? s.Bar.ActualWidth : 120;
+                s.Fill.Width = Math.Max(0, pct / 100) * w;
+            }
+            spark.Refresh();
+        });
+        return rows;
+    }
+
+    sealed class DsSlot
+    {
+        public FrameworkElement Box = null!;
+        public TextBlock Name = null!, Cost = null!, Tokens = null!, Requests = null!, Percent = null!;
+        public Grid Bar = null!;
+        public Border Fill = null!;
+    }
+
+    /// <summary>Riquadro di un modello: nome, costo, token, richieste e barra cache hit.</summary>
+    DsSlot DsModelRow(Brush accent)
+    {
+        var inner = new StackPanel();
+        var top = new Grid();
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var name = Txt("—", 12.5 * _u, accent, bold: true);
+        var cost = Txt("—", 12.5 * _u, new SolidColorBrush(_p.Text), bold: true, mono: true, align: TextAlignment.Right);
+        Grid.SetColumn(cost, 1);
+        top.Children.Add(name);
+        top.Children.Add(cost);
+        inner.Children.Add(top);
+
+        var stats = new Grid { Margin = new Thickness(0, 5 * _u * _rs, 0, 0) };
+        stats.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        stats.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var tokens = Txt("—", 11.5 * _u, new SolidColorBrush(_p.Text), mono: true, bold: true);
+        var requests = Txt("—", 10.5 * _u, new SolidColorBrush(_p.TextDim), mono: true, align: TextAlignment.Right);
+        Grid.SetColumn(requests, 1);
+        stats.Children.Add(tokens);
+        stats.Children.Add(requests);
+        inner.Children.Add(stats);
+
+        var track = new Border
+        {
+            Height = 8 * _u * _rs,
+            CornerRadius = new CornerRadius(4 * _u * _rs),
+            Background = new SolidColorBrush(_p.Track),
+        };
+        var fill = new Border
+        {
+            Height = 8 * _u * _rs,
+            Width = 0,
+            CornerRadius = new CornerRadius(4 * _u * _rs),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Background = new SolidColorBrush(DsHit),
+        };
+        var percent = Txt("—", 10 * _u, new SolidColorBrush(DsHit), bold: true, mono: true, align: TextAlignment.Right);
+        var bar = new Grid { Margin = new Thickness(0, 5 * _u * _rs, 0, 0) };
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var host = new Grid();
+        host.Children.Add(track);
+        host.Children.Add(fill);
+        Grid.SetColumn(host, 0);
+        Grid.SetColumn(percent, 1);
+        bar.Children.Add(host);
+        bar.Children.Add(percent);
+        inner.Children.Add(bar);
+
+        var box = Surface(8 * _u, Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF),
+                          new Thickness(10 * _u, 8 * _u * _rs, 10 * _u, 9 * _u * _rs),
+                          new Thickness(0, 7 * _u * _rs, 0, 0));
+        box.Child = inner;
+        return new DsSlot
+        {
+            Box = box, Name = name, Cost = cost, Tokens = tokens,
+            Requests = requests, Percent = percent, Bar = host, Fill = fill,
+        };
+    }
+
+    /// <summary>Riquadro "Oggi" / "Mese" con l'importo.</summary>
+    (FrameworkElement Box, TextBlock Value) DsStat(string label, Brush accent)
+    {
+        var stack = new StackPanel();
+        stack.Children.Add(Txt(label, 9.5 * _u, new SolidColorBrush(_p.TextDim), bold: true));
+        var value = Txt("—", 11 * _u, accent, bold: true, mono: true);
+        value.Margin = new Thickness(0, 2 * _u, 0, 0);
+        stack.Children.Add(value);
+        var box = Surface(7 * _u, Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF),
+                          new Thickness(7 * _u, 6 * _u * _rs, 7 * _u, 7 * _u * _rs), new Thickness(0));
+        box.Child = stack;
+        return (box, value);
+    }
+
+    FrameworkElement DsLegend()
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6 * _u * _rs, 0, 0) };
+        foreach (var (color, text) in new[] { (DsHit, "cache hit"), (DsMiss, "miss"), (DsOut, "output") })
+        {
+            var item = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 10 * _u, 0) };
+            item.Children.Add(new Border
+            {
+                Width = 6 * _u,
+                Height = 6 * _u,
+                CornerRadius = new CornerRadius(3 * _u),
+                Background = new SolidColorBrush(color),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 4 * _u, 0),
+            });
+            item.Children.Add(Txt(text, 9.5 * _u, new SolidColorBrush(_p.TextDim)));
+            row.Children.Add(item);
+        }
+        return row;
+    }
+
     /// <summary>Colour of a meter: the fixed per-element colour when set, otherwise the
     /// threshold colours.</summary>
     Brush MeterColor(string element, double pct, bool isTemp)
@@ -566,7 +834,7 @@ internal sealed class WidgetView
     FrameworkElement MetricRow(string key, string element, string label, Func<Metrics, string> text, Func<Metrics, double> pct,
                                Func<Metrics, double> graphValue, bool graphs, bool isTemp, bool isLast)
     {
-        var inner = new StackPanel { Margin = new Thickness(0, 0, 0, isLast ? 0 : 11 * _u * _rs) };
+        var inner = new StackPanel { Margin = new Thickness(0, 0, 0, isLast ? 0 : RowGap) };
 
         var top = new Grid();
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -602,7 +870,9 @@ internal sealed class WidgetView
         if (graphs)
         {
             graph = Graph($"panel.{key}", new SolidColorBrush(_p.Ok), Brushes.Transparent, isTemp ? 0 : 100, 24 * _u * _c.GraphHeightScale);
-            graph.Margin = new Thickness(0, 6 * _u * _rs, 0, 0);
+            // il grafico arriva ai bordi del box: ai lati sempre, in basso solo nell'ultima
+            // riga (dove sotto c'è il bordo della card); il pieno sfuma verso i bordi
+            graph.Margin = new Thickness(-CardPad, 6 * _u * _rs, -CardPad, isLast ? -CardBottom : 0);
             inner.Children.Add(graph);
         }
 
@@ -652,10 +922,10 @@ internal sealed class WidgetView
         if (graphs)
         {
             graphLeft = Graph($"panel.{element}.l", colorLeft, Brushes.Transparent, 0, 22 * _u * _c.GraphHeightScale);
-            graphLeft.Margin = new Thickness(0, 5 * _u * _rs, 0, 0);
+            graphLeft.Margin = new Thickness(-CardPad, 5 * _u * _rs, 0, -CardBottom);
             cellLeft.Children.Add(graphLeft);
             graphRight = Graph($"panel.{element}.r", colorRight, Brushes.Transparent, 0, 22 * _u * _c.GraphHeightScale);
-            graphRight.Margin = new Thickness(0, 5 * _u * _rs, 0, 0);
+            graphRight.Margin = new Thickness(0, 5 * _u * _rs, -CardPad, -CardBottom);
             cellRight.Children.Add(graphRight);
         }
 

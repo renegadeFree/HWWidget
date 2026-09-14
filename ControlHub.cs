@@ -43,6 +43,7 @@ sealed class ControlHub : Window
         ("ram", "RAM", "\uE964"),
         ("disk", "Disco", "\uEDA2"),
         ("net", "Rete", "\uE968"),
+        ("ds", "DeepSeek", "\uE9D2"),
     };
 
     readonly AppController _app;
@@ -292,8 +293,10 @@ sealed class ControlHub : Window
             TextButton("Crea", () => Add("net"))));
         _content.Children.Add(Card("\uE9D9", "CPU + GPU", "Due schede con i dati principali.",
             TextButton("Crea", () => Add("cpugpu"))));
-        _content.Children.Add(Card("\uE945", "Solo AI", "Saldo DeepSeek, spesa API e token di ChatGPT e Claude, con grafici.",
+        _content.Children.Add(Card("\uE945", "Solo AI", "Budget rimasto, budget consumato e token totali di DeepSeek, ChatGPT e Claude (solo numeri).",
             TextButton("Crea", () => Add("ai"))));
+        _content.Children.Add(Card("\uE9D2", "Solo DeepSeek", "Saldo, spesa di oggi e del mese, token e cache hit per modello, con grafico giornaliero.",
+            TextButton("Crea", () => Add("ds"), accent: true)));
     }
 
     void BuildAppPage()
@@ -307,7 +310,14 @@ sealed class ControlHub : Window
             "token totali di ChatGPT e Claude → letti dai log locali delle rispettive CLI, senza chiavi. " +
             "I limiti di reset degli abbonamenti (ChatGPT/Claude) non sono esposti da nessuna API pubblica.",
             new TextBlock { Text = "", Width = 0 }));
+        _content.Children.Add(CardFull("\uE9D2", "Token di utilizzo DeepSeek (solo per il widget DeepSeek)",
+            "Uso, spesa e cache hit esatti non sono nell'API ufficiale (che espone solo il saldo): si leggono dalle API " +
+            "interne di platform.deepseek.com, le stesse della dashboard web. Serve il token di sessione del sito, che scade: " +
+            "apri platform.deepseek.com nel browser, accedi, premi F12 → Console, incolla " +
+            "JSON.parse(localStorage.userToken).value e copia la stringa restituita.",
+            new TextBlock { Text = "", Width = 0 }));
         (FrameworkElement deepSeekRow, PasswordBox deepSeek) = KeyRow("DeepSeek API key", keys.DeepSeek);
+        (FrameworkElement deepSeekUsageRow, PasswordBox deepSeekUsage) = KeyRow("Token di utilizzo DeepSeek", keys.DeepSeekUsage);
         (FrameworkElement openAiRow, PasswordBox openAi) = KeyRow("OpenAI admin key", keys.OpenAi);
         (FrameworkElement anthropicRow, PasswordBox anthropic) = KeyRow("Anthropic admin key", keys.Anthropic);
         (FrameworkElement githubRow, PasswordBox github) = KeyRow("Token GitHub (aggiornamenti, repo privata)", keys.GitHub);
@@ -319,6 +329,7 @@ sealed class ControlHub : Window
         saveRow.Children.Add(TextButton("Salva chiavi", () =>
         {
             keys.DeepSeek = deepSeek.Password.Trim();
+            keys.DeepSeekUsage = deepSeekUsage.Password.Trim();
             keys.OpenAi = openAi.Password.Trim();
             keys.Anthropic = anthropic.Password.Trim();
             keys.GitHub = github.Password.Trim();
@@ -329,7 +340,7 @@ sealed class ControlHub : Window
         saveRow.Children.Add(TextButton("Rileggi ora", () => _ = SensorHub.RefreshAiAsync()));
         // CardFull: con la card normale i campi stretti schiacciano la descrizione in verticale
         _content.Children.Add(CardFull("\uE72C", "Chiavi", "Salvate cifrate (DPAPI) in " + Path.Combine(WidgetConfig.Dir, "keys.dat"),
-            NewColumn(deepSeekRow, openAiRow, anthropicRow, githubRow, interval, saveRow)));
+            NewColumn(deepSeekRow, deepSeekUsageRow, openAiRow, anthropicRow, githubRow, interval, saveRow)));
 
         SubTitle("Aggiornamenti");
         var updateInfo = new TextBlock
@@ -412,6 +423,7 @@ sealed class ControlHub : Window
             ("\uE7FC", "GPU", Switch(() => c.ShowGpu, v => { c.ShowGpu = v; Apply(w, true); })),
             ("\uE964", "RAM", Switch(() => c.ShowRam, v => { c.ShowRam = v; Apply(w, true); })),
             ("\uEDA2", "Disco", Switch(() => c.ShowDisk, v => { c.ShowDisk = v; Apply(w, true); })),
+            ("\uE9D2", "DeepSeek (saldo, uso e spesa del mese)", Switch(() => c.ShowDs, v => { c.ShowDs = v; Apply(w, true); })),
             ("\uE9D2", "Metriche secondarie", Switch(() => c.ShowSecondary, v => { c.ShowSecondary = v; Apply(w, true); })),
             ("\uE8A7", "Titolo “HW Widget” nel pannello", Switch(() => c.ShowTitle, v => { c.ShowTitle = v; Apply(w, true); }))));
         _content.Children.Add(Expander("\uE945", "Sezione AI", "Solo numeri, senza grafici: budget rimasto, budget consumato e token totali. " +

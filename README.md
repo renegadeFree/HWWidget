@@ -5,6 +5,8 @@ e un hub di controllo in stile Impostazioni di Windows.
 
 ![Pannello](docs/hub.png)
 
+![Pannello completo](docs/panel-graphs.png)
+
 ## Cosa mostra
 
 | Elemento | Dati | Sorgente (nessun driver, nessun admin) |
@@ -19,6 +21,8 @@ e un hub di controllo in stile Impostazioni di Windows.
 
 - **Layout**: righe compatte, card per elemento, tessere, pannello a barre e pannello con grafici.
 - **Grafici**: stile area/linea/barre/scalini, durata 30 s → 10 min, aggiornamento 0,5/1/2 s.
+  Arrivano ai bordi del box (a destra, a sinistra e in basso dove serve) e si spengono con
+  una leggera sfumatura; il pieno sotto la linea sfuma verso il basso.
 - **Materiale**: acrylic sfocato (sempre sfocato), Mica, Mica Alt, Acrylic DWM o pannello pieno.
 - **Multi monitor**: posizione ricordata per monitor (device id + offset in pixel fisici).
 - **Hub di controllo**: una pagina per widget con tutte le opzioni, applicate in tempo reale,
@@ -32,6 +36,18 @@ e un hub di controllo in stile Impostazioni di Windows.
   Spegnendo un fornitore le sue righe spariscono dal widget.
 
   ![Widget AI](docs/ai.png)
+
+- **Widget DeepSeek** dedicato (preset "Solo DeepSeek"), con gli stessi dati del monitor di
+  riferimento [Joyi-code/DeepSeekMonitorWindows](https://github.com/Joyi-code/DeepSeekMonitorWindows):
+  saldo e disponibilità, costo di oggi e del mese, un riquadro per modello (token, richieste,
+  cache hit, costo) e il grafico giornaliero a barre impilate (cache hit / miss / output).
+  Saldo dall'API ufficiale; uso, spesa e cache hit dalle API interne di
+  `platform.deepseek.com` (l'API ufficiale non li espone). Serve il token di sessione del
+  sito: apri platform.deepseek.com, F12 → Console, `JSON.parse(localStorage.userToken).value`,
+  poi incollalo in *Hub → Impostazioni app → Chiavi* (voce "Token di utilizzo DeepSeek").
+  Il token scade: se i dati diventano `n/d`, ripetilo.
+
+  ![Widget DeepSeek](docs/deepseek.png)
 
 - **Aggiornamento automatico** dalle release GitHub: controlla, chiede, scarica e riavvia.
   `HWWidget.exe --update-silent` fa lo stesso giro senza interfaccia (per aggiornamenti

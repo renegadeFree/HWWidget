@@ -25,6 +25,8 @@ sealed class AiSnapshot
     public string CodexTokens = "", ClaudeTokens = "";
     public double CodexWeekTokens;
     public double CodexTokensValue, ClaudeTokensValue;
+    /// <summary>Dati completi DeepSeek (saldo + uso/spesa del mese) per il widget dedicato.</summary>
+    public DeepSeekUsage Deep = new();
     public string Status = "";
     public DateTime FetchedUtc;
 }
@@ -36,6 +38,9 @@ sealed class AiKeys
     public string OpenAi { get; set; } = "";
     public string Anthropic { get; set; } = "";
     public string GitHub { get; set; } = "";      // per l'auto-update dalla repo privata
+    /// <summary>Token di sessione di platform.deepseek.com (uso e spesa): l'API ufficiale
+    /// DeepSeek espone solo il saldo. Si prende dal browser: console → JSON.parse(localStorage.userToken).value</summary>
+    public string DeepSeekUsage { get; set; } = "";
     public int RefreshMinutes { get; set; } = 15; // ogni quanto rileggere le API AI
     public bool CheckUpdatesOnStartup { get; set; } = true;
 
@@ -115,27 +120,14 @@ static class AiUsage
         var s = new AiSnapshot { FetchedUtc = DateTime.UtcNow };
         var problems = new List<string>();
 
-        if (keys.DeepSeek.Length > 0)
+        if (keys.DeepSeek.Length > 0 || keys.DeepSeekUsage.Length > 0)
         {
-            try
-            {
-                using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.deepseek.com/user/balance");
-                req.Headers.Add("Authorization", "Bearer " + keys.DeepSeek);
-                using var res = await Http.SendAsync(req);
-                string body = await res.Content.ReadAsStringAsync();
-                if (res.IsSuccessStatusCode)
-                {
-                    var (value, spent, currency) = ParseDeepSeekBalance(body);
-                    if (value.HasValue)
-                    {
-                        s.DeepSeekValue = value.Value;
-                        s.DeepSeekBalance = value.Value.ToString("0.00", CultureInfo.CurrentCulture) + " " + currency;
-                        if (spent.HasValue) s.DeepSeekSpent = Money(Math.Max(0, spent.Value));
-                    }
-                }
-                else problems.Add($"DeepSeek {(int)res.StatusCode}");
-            }
-            catch (Exception ex) { problems.Add("DeepSeek: " + ex.Message); }
+            // saldo (API key) + uso e spesa del mese (token di sessione della piattaforma)
+            s.Deep = await DeepSeekUsage.FetchAsync(keys.DeepSeek, keys.DeepSeekUsage);
+            s.DeepSeekValue = s.Deep.BalanceValue;
+            s.DeepSeekBalance = s.Deep.Balance;
+            s.DeepSeekSpent = s.Deep.Spent;
+            if (keys.DeepSeek.Length > 0 && s.Deep.Balance.Length == 0) problems.Add("DeepSeek saldo n/d");
         }
 
         if (keys.OpenAi.Length > 0)
@@ -221,21 +213,11 @@ static class AiUsage
 
     // ---- parser tolleranti: cercano i campi utili invece di fissare lo schema ----
 
-    /// <summary>Saldo e speso. ponytail: lo speso è ricariche meno saldo, con i crediti
-    /// omaggio può risultare 0; DeepSeek non espone un totale di token.</summary>
+    /// <summary>Saldo e speso (compatibilità: il parsing sta in DeepSeekUsage).</summary>
     public static (double? value, double? spent, string currency) ParseDeepSeekBalance(string json)
     {
-        using var doc = JsonDocument.Parse(json);
-        if (doc.RootElement.TryGetProperty("balance_infos", out var infos) && infos.GetArrayLength() > 0)
-        {
-            var first = infos[0];
-            double? value = first.TryGetProperty("total_balance", out var t) ? ToNumber(t) : null;
-            double? topped = first.TryGetProperty("topped_up_balance", out var tp) ? ToNumber(tp) : null;
-            string currency = first.TryGetProperty("currency", out var c) ? c.GetString() ?? "" : "";
-            double? spent = value.HasValue && topped.HasValue ? Math.Max(0, topped.Value - value.Value) : null;
-            return (value, spent, currency);
-        }
-        return (null, null, "");
+        var (total, spent, _, currency, _) = DeepSeekUsage.ParseBalance(json);
+        return (total, spent, currency);
     }
 
     /// <summary>Somma gli importi per giorno: funziona sia col formato OpenAI
@@ -283,6 +265,314 @@ static class AiUsage
             return d.Date;
         return null;
     }
+}
+
+/// <summary>Uso e spesa DeepSeek del mese. Il saldo arriva dall'API ufficiale
+/// (api.deepseek.com/user/balance); token, richieste, cache hit e costo arrivano dalle
+/// API interne della piattaforma (platform.deepseek.com/api/v0/usage/amount e /cost),
+/// le stesse che usa la dashboard web: servono il token di sessione del sito, non la
+/// API key. Struttura dei due JSON (verificata sul monitor open source
+/// Joyi-code/DeepSeekMonitorWindows):
+///   amount → data.biz_data.total[]  {model, usage[{type, amount}]}
+///            data.biz_data.days[]   {date, data[{model, usage[]}]}
+///   cost   → data.biz_data[]        {total[...], days[...]}  (stesse forme)
+/// tipi: REQUEST, PROMPT_CACHE_HIT_TOKEN, PROMPT_CACHE_MISS_TOKEN, RESPONSE_TOKEN, PROMPT_TOKEN
+/// </summary>
+sealed class DeepSeekUsage
+{
+    static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
+    const string Ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+    public string Balance = "", Currency = "", Spent = "";
+    public double BalanceValue;
+    public bool Available;
+    public string TodayCost = "", MonthCost = "";
+    public double TodayValue, MonthValue;
+    public List<DsModel> Models = new();
+    public List<DsDay> Days = new();
+    public string Status = "";
+    public DateTime FetchedUtc;
+
+    public bool HasUsage => Models.Count > 0 || Days.Count > 0;
+    public string HitRate => Days.Count == 0 && Models.Count == 0 ? ""
+        : AiUsage.Tokens(Models.Sum(m => m.Hit) + Models.Sum(m => m.Miss) + Models.Sum(m => m.Out));
+
+    public static async Task<DeepSeekUsage> FetchAsync(string apiKey, string usageToken)
+    {
+        var u = new DeepSeekUsage { FetchedUtc = DateTime.UtcNow };
+        var problems = new List<string>();
+
+        if (apiKey.Length > 0)
+        {
+            try
+            {
+                string body = await GetAsync("https://api.deepseek.com/user/balance", apiKey, official: true);
+                var (total, spent, granted, currency, available) = ParseBalance(body);
+                if (total.HasValue)
+                {
+                    u.BalanceValue = total.Value;
+                    u.Currency = currency;
+                    u.Available = available;
+                    u.Balance = Money(total.Value, currency);
+                    if (spent.HasValue) u.Spent = Money(Math.Max(0, spent.Value), currency);
+                }
+                else problems.Add("saldo non leggibile");
+                if (granted is > 0) problems.Add($"crediti omaggio {Money(granted.Value, currency)}");
+            }
+            catch (Exception ex) { problems.Add("saldo: " + ex.Message); }
+        }
+        else problems.Add("serve la API key per il saldo");
+
+        if (usageToken.Length > 0)
+        {
+            try
+            {
+                var now = DateTime.Now;
+                string amount = await GetAsync(
+                    $"https://platform.deepseek.com/api/v0/usage/amount?month={now.Month}&year={now.Year}", usageToken, false);
+                string cost = await GetAsync(
+                    $"https://platform.deepseek.com/api/v0/usage/cost?month={now.Month}&year={now.Year}", usageToken, false);
+                Parse(amount, cost, u, now);
+            }
+            catch (Exception ex) { problems.Add("uso: " + ex.Message); }
+        }
+        else problems.Add("serve il token di utilizzo (platform.deepseek.com) per token, richieste e spesa");
+
+        u.Status = string.Join(" · ", problems);
+        return u;
+    }
+
+    static async Task<string> GetAsync(string url, string token, bool official)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Add("Authorization", "Bearer " + token.Trim());
+        if (!official)
+        {
+            req.Headers.Add("x-app-version", "1.0.0");
+            req.Headers.Add("Accept", "*/*");
+            req.Headers.TryAddWithoutValidation("User-Agent", Ua);
+        }
+        using var res = await Http.SendAsync(req);
+        if (!res.IsSuccessStatusCode) throw new Exception($"HTTP {(int)res.StatusCode}");
+        return await res.Content.ReadAsStringAsync();
+    }
+
+    static string Money(double v, string currency)
+        => v.ToString("0.00", CultureInfo.CurrentCulture) + " " + (currency.Length > 0 ? currency : "$");
+
+    /// <summary>Importo formattato nella valuta del saldo.</summary>
+    public static string Text(double v, string currency) => Money(v, currency);
+
+    /// <summary>Saldo, speso (ricariche − saldo), crediti omaggio, valuta, disponibilità.</summary>
+    public static (double? total, double? spent, double? granted, string currency, bool available) ParseBalance(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        bool available = root.TryGetProperty("is_available", out var av) && av.ValueKind == JsonValueKind.True;
+        if (!root.TryGetProperty("balance_infos", out var infos) || infos.ValueKind != JsonValueKind.Array
+            || infos.GetArrayLength() == 0)
+            return (null, null, null, "", available);
+        var first = infos[0];
+        double? total = first.TryGetProperty("total_balance", out var t) ? Num(t) : null;
+        double? topped = first.TryGetProperty("topped_up_balance", out var tp) ? Num(tp) : null;
+        double? granted = first.TryGetProperty("granted_balance", out var g) ? Num(g) : null;
+        string currency = first.TryGetProperty("currency", out var c) ? c.GetString() ?? "" : "";
+        double? spent = total.HasValue && topped.HasValue ? Math.Max(0, topped.Value - total.Value) : null;
+        return (total, spent, granted, currency, available);
+    }
+
+    /// <summary>Riempie modelli e giorni del mese dalle due risposte JSON.</summary>
+    public static void Parse(string amountJson, string costJson, DeepSeekUsage u, DateTime month)
+    {
+        var costs = CostByModel(costJson);
+        var costDays = CostByDay(costJson);
+        var total = new List<(string model, List<(string type, double amount)> usage)>();
+        var days = new List<(string date, List<(string model, List<(string type, double amount)> usage)> data)>();
+        using (var doc = JsonDocument.Parse(amountJson))
+        {
+            if (!Data(doc.RootElement, out var biz)) return;
+            if (biz.TryGetProperty("total", out var t) && t.ValueKind == JsonValueKind.Array)
+                foreach (var m in t.EnumerateArray()) total.Add(ModelUsage(m));
+            if (biz.TryGetProperty("days", out var d) && d.ValueKind == JsonValueKind.Array)
+                foreach (var day in d.EnumerateArray())
+                {
+                    var list = new List<(string, List<(string, double)>)>();
+                    if (day.TryGetProperty("data", out var mlist) && mlist.ValueKind == JsonValueKind.Array)
+                        foreach (var m in mlist.EnumerateArray()) list.Add(ModelUsage(m));
+                    days.Add((day.TryGetProperty("date", out var ds) ? ds.GetString() ?? "" : "", list));
+                }
+        }
+
+        foreach (var (model, usage) in total)
+        {
+            var (tokens, requests, hit, miss, response) = Breakdown(usage);
+            u.Models.Add(new DsModel
+            {
+                Key = model,
+                Name = ShortName(model),
+                Tokens = tokens,
+                Requests = requests,
+                Hit = hit,
+                Miss = miss,
+                Out = response,
+                Cost = costs.TryGetValue(model, out var c) ? c : 0,
+            });
+        }
+        u.Models.Sort((a, b) => b.Tokens.CompareTo(a.Tokens));
+
+        foreach (var (date, data) in days)
+        {
+            var day = new DsDay { Date = date, Label = DayLabel(date, month) };
+            foreach (var (model, usage) in data)
+            {
+                var (tokens, _, hit, miss, response) = Breakdown(usage);
+                day.Hit += hit;
+                day.Miss += miss;
+                day.Out += response;
+                day.Tokens += tokens;
+            }
+            if (costDays.TryGetValue(date, out var cd)) day.Cost = cd;
+            u.Days.Add(day);
+        }
+        u.Days = u.Days.Where(d => d.Tokens > 0 || d.Cost > 0).ToList();
+        while (u.Days.Count > 0 && u.Days[^1].Tokens == 0 && u.Days[^1].Cost == 0) u.Days.RemoveAt(u.Days.Count - 1);
+
+        u.MonthValue = u.Models.Sum(m => m.Cost);
+        u.MonthCost = Money(u.MonthValue, u.Currency);
+        var today = u.Days.FirstOrDefault(d => d.Date == month.ToString("yyyy-MM-dd"));
+        if (today != null)
+        {
+            u.TodayValue = today.Cost;
+            u.TodayCost = Money(today.Cost, u.Currency);
+        }
+    }
+
+    /// <summary>(token totali, richieste, cache hit, cache miss, output).</summary>
+    public static (double tokens, double requests, double hit, double miss, double response)
+        Breakdown(List<(string type, double amount)> usage)
+    {
+        double tokens = 0, requests = 0, hit = 0, miss = 0, response = 0;
+        foreach (var (type, amount) in usage)
+        {
+            switch (type)
+            {
+                case "REQUEST": requests = amount; break;
+                case "PROMPT_CACHE_HIT_TOKEN": hit = amount; tokens += amount; break;
+                case "PROMPT_CACHE_MISS_TOKEN": miss = amount; tokens += amount; break;
+                case "RESPONSE_TOKEN": response = amount; tokens += amount; break;
+                case "PROMPT_TOKEN": tokens += amount; break;
+            }
+        }
+        return (tokens, requests, hit, miss, response);
+    }
+
+    /// <summary>Nel JSON del costo i valori sono importi: si escludono le richieste.</summary>
+    static Dictionary<string, double> CostByModel(string json)
+    {
+        var res = new Dictionary<string, double>();
+        using var doc = JsonDocument.Parse(json);
+        if (!Data(doc.RootElement, out var biz) || !biz.TryGetProperty("total", out var t)
+            || t.ValueKind != JsonValueKind.Array) return res;
+        foreach (var m in t.EnumerateArray())
+        {
+            string model = m.TryGetProperty("model", out var mv) ? mv.GetString() ?? "" : "";
+            double sum = 0;
+            if (m.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Array)
+                foreach (var e in usage.EnumerateArray())
+                    if (!IsRequest(e)) sum += Amount(e);
+            res[model] = sum;
+        }
+        return res;
+    }
+
+    static Dictionary<string, double> CostByDay(string json)
+    {
+        var res = new Dictionary<string, double>();
+        using var doc = JsonDocument.Parse(json);
+        if (!Data(doc.RootElement, out var biz) || !biz.TryGetProperty("days", out var days)
+            || days.ValueKind != JsonValueKind.Array) return res;
+        foreach (var day in days.EnumerateArray())
+        {
+            string date = day.TryGetProperty("date", out var ds) ? ds.GetString() ?? "" : "";
+            double sum = 0;
+            if (day.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+                foreach (var m in data.EnumerateArray())
+                    if (m.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Array)
+                        foreach (var e in usage.EnumerateArray())
+                            if (!IsRequest(e)) sum += Amount(e);
+            res[date] = sum;
+        }
+        return res;
+    }
+
+    /// <summary>data.biz_data è un oggetto in /amount e un array in /cost: accetta entrambi.</summary>
+    static bool Data(JsonElement root, out JsonElement biz)
+    {
+        biz = default;
+        if (!root.TryGetProperty("data", out var data)) return false;
+        if (!data.TryGetProperty("biz_data", out var b)) return false;
+        if (b.ValueKind == JsonValueKind.Array)
+        {
+            if (b.GetArrayLength() == 0) return false;
+            b = b[0];
+        }
+        if (b.ValueKind != JsonValueKind.Object) return false;
+        biz = b;
+        return true;
+    }
+
+    static (string model, List<(string type, double amount)> usage) ModelUsage(JsonElement m)
+    {
+        string model = m.TryGetProperty("model", out var mv) ? mv.GetString() ?? "" : "";
+        var usage = new List<(string, double)>();
+        if (m.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Array)
+            foreach (var e in u.EnumerateArray())
+                usage.Add((e.TryGetProperty("type", out var tv) ? tv.GetString() ?? "" : "", Amount(e)));
+        return (model, usage);
+    }
+
+    static bool IsRequest(JsonElement e)
+        => e.TryGetProperty("type", out var tv) && tv.GetString() == "REQUEST";
+
+    static double Amount(JsonElement e)
+        => e.TryGetProperty("amount", out var a) ? Num(a) ?? 0 : 0;
+
+    static double? Num(JsonElement e) => e.ValueKind switch
+    {
+        JsonValueKind.Number => e.GetDouble(),
+        JsonValueKind.String => double.TryParse(e.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : null,
+        _ => null,
+    };
+
+    /// <summary>Nome leggibile per il modello (DeepSeek cambia i nomi con le versioni).</summary>
+    public static string ShortName(string model) => model switch
+    {
+        "deepseek-v4-flash" => "V4 Flash",
+        "deepseek-v4-pro" => "V4 Pro",
+        "deepseek-chat" => "Chat",
+        "deepseek-reasoner" => "Reasoner",
+        _ => model.StartsWith("deepseek-", StringComparison.Ordinal) ? model["deepseek-".Length..] : model,
+    };
+
+    static string DayLabel(string date, DateTime month)
+        => DateTime.TryParse(date, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
+            ? $"{d.Day}" : date;
+}
+
+sealed class DsModel
+{
+    public string Key = "", Name = "";
+    public double Tokens, Requests, Hit, Miss, Out, Cost;
+    public double HitPct => Tokens > 0 ? Hit * 100 / Tokens : 0;
+    public double MissPct => Tokens > 0 ? Miss * 100 / Tokens : 0;
+    public double OutPct => Tokens > 0 ? Out * 100 / Tokens : 0;
+}
+
+sealed class DsDay
+{
+    public string Date = "", Label = "";
+    public double Hit, Miss, Out, Cost, Tokens;
 }
 
 /// <summary>Token totali dai log della CLI Codex (~/.codex/sessions/*.jsonl):
