@@ -123,7 +123,7 @@ public partial class MainWindow : Window
         bool taller = _naturalHeight > _prevNatural + 0.5;
         if (grow && _naturalHeight > avail + 0.5 && (taller || _fit >= 0.999))
         {
-            Height = FitHeight();
+            Height = Math.Max(MinHeight, Math.Min(FitHeight(), RoomBelow()));
             SavePosition();
             avail = InnerHeight() - 4;
         }
@@ -193,6 +193,16 @@ public partial class MainWindow : Window
         double h = ActualHeight > 10 ? ActualHeight : _c.Height;
         return Math.Max(40, h - Root.Padding.Top - Root.Padding.Bottom
                                    - Root.BorderThickness.Top - Root.BorderThickness.Bottom);
+    }
+
+    /// <summary>Quanto può crescere la finestra restando dentro l'area di lavoro del monitor
+    /// (crescendo verso il basso non finisce sopra la barra delle applicazioni).</summary>
+    double RoomBelow()
+    {
+        if (_hwnd == IntPtr.Zero || !Native.GetWindowRect(_hwnd, out var r)) return FitHeight();
+        var scr = WF.Screen.FromHandle(_hwnd);
+        double dpi = Math.Max(1, Native.GetDpiForWindow(_hwnd) / 96.0);
+        return Math.Max(MinHeight, (scr.WorkingArea.Bottom - r.T) / dpi);
     }
 
     void OnTick(Metrics m)
