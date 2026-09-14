@@ -593,7 +593,7 @@ static class SelfTest
             Check(dw <= 2 && dh <= 2, $"dimensioni ripristinate diverse: Δ{dw},{dh} px");
             Say("geometria", $"{s2.Monitor} offset {s2.OffX:0},{s2.OffY:0} · {w}×{h} px → riaperto a Δ{dx},{dy} Δ{dw}×{dh}");
             Say("geometria-dip", $"{s2.Width:0}×{s2.Height:0} DIP salvati, finestra {w}×{h} px (scala schermo {dpi:0.##})");
-            s2.Delete();
+            DeleteConfig(id);
         }
         catch (Exception ex)
         {
