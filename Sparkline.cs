@@ -15,28 +15,22 @@ public sealed class Series
     const int Cap = 1200;
     readonly double[] _a = new double[Cap];
     readonly double[] _b = new double[Cap];
-    readonly double[] _c = new double[Cap];
     int _head, _count;
     bool _hasB;
-    bool _hasC;
 
     public int Count => _count;
     public bool HasB => _hasB;
-    public bool HasC => _hasC;
     public int Head => _head;
     public double A(int i) => _a[i];
     public double B(int i) => _b[i];
-    public double C(int i) => _c[i];
     public double Last => _a[(_head - 1 + Cap) % Cap];
     public double Oldest(int visible) => _a[(_head - Math.Min(visible, _count) + Cap) % Cap];
 
-    public void Push(double a, double b = double.NaN, double c = double.NaN)
+    public void Push(double a, double b = double.NaN)
     {
         _a[_head] = a;
         _b[_head] = b;
-        _c[_head] = c;
         if (!double.IsNaN(b)) _hasB = true;
-        if (!double.IsNaN(c)) _hasC = true;
         _head = (_head + 1) % Cap;
         if (_count < Cap) _count++;
     }
@@ -45,10 +39,8 @@ public sealed class Series
     {
         Array.Clear(_a);
         Array.Clear(_b);
-        Array.Clear(_c);
         _head = _count = 0;
         _hasB = false;
-        _hasC = false;
     }
 }
 
@@ -60,20 +52,17 @@ public sealed class Sparkline : FrameworkElement
     public Series Series { get; set; } = new();
     public Brush StrokeA { get; set; } = new SolidColorBrush(Color.FromRgb(0x4C, 0xC2, 0xFF));
     public Brush StrokeB { get; set; } = new SolidColorBrush(Color.FromRgb(0x8A, 0xE0, 0x7A));
-    public Brush StrokeC { get; set; } = new SolidColorBrush(Color.FromRgb(0xA7, 0x8B, 0xFA));
     /// <summary>Not named Style: FrameworkElement already owns that name.</summary>
     public GraphStyle GraphStyle { get; set; } = HWWidget.GraphStyle.Area;
     public double VMax { get; set; } = 100;      // 0 => auto-scale
     public int WindowSamples { get; set; } = 60;
-    /// <summary>Tre serie impilate (usato dal grafico giornaliero DeepSeek).</summary>
-    public bool Stacked { get; set; }
 
     static readonly Brush GridBrush = new SolidColorBrush(Color.FromArgb(0x22, 0xFF, 0xFF, 0xFF));
     static readonly Pen GridPen = new Pen(GridBrush, 1);
 
-    public void Push(double a, double b = double.NaN, double c = double.NaN)
+    public void Push(double a, double b = double.NaN)
     {
-        Series.Push(a, b, c);
+        Series.Push(a, b);
         InvalidateVisual();
     }
 
@@ -102,8 +91,7 @@ public sealed class Sparkline : FrameworkElement
             return;
         }
 
-        bool stacked = Stacked && Series.HasC;
-        double vmax = VMax > 0 ? VMax : stacked ? AutoMaxStacked(vis) : AutoMax(vis);
+        double vmax = VMax > 0 ? VMax : AutoMax(vis);
         if (vmax <= 0) vmax = 1;
         int start = (Series.Head - vis + 1200 * 8) % 1200;
 
@@ -111,12 +99,8 @@ public sealed class Sparkline : FrameworkElement
         dc.PushOpacityMask(EdgeFade(w));
         if (GraphStyle == HWWidget.GraphStyle.Bars)
         {
-            if (stacked) DrawStackedBars(dc, start, vis, w, h, vmax);
-            else
-            {
-                DrawBars(dc, false, start, vis, w, h, vmax, StrokeA);
-                if (Series.HasB) DrawBars(dc, true, start, vis, w, h, vmax, StrokeB);
-            }
+            DrawBars(dc, false, start, vis, w, h, vmax, StrokeA);
+            if (Series.HasB) DrawBars(dc, true, start, vis, w, h, vmax, StrokeB);
             dc.Pop();
             return;
         }
@@ -147,50 +131,7 @@ public sealed class Sparkline : FrameworkElement
         return g;
     }
 
-    double AutoMaxStacked(int vis)
-    {
-        double m = 0;
-        for (int i = 0; i < vis; i++)
-        {
-            int idx = (Series.Head - vis + i + 1200 * 8) % 1200;
-            double sum = San(Series.A(idx)) + San(Series.B(idx)) + San(Series.C(idx));
-            if (sum > m) m = sum;
-        }
-        return m <= 0 ? 1 : m * 1.08;
-    }
-
     static double San(double v) => double.IsNaN(v) || v < 0 ? 0 : v;
-
-    /// <summary>Barre impilate: hit (in basso), miss, output in cima.</summary>
-    void DrawStackedBars(DrawingContext dc, int start, int vis, double w, double h, double vmax)
-    {
-        int bars = Math.Min(MaxBars, vis);
-        double slot = w / bars;
-        double barW = Math.Max(1.0, slot * 0.62);
-        double baseY = h - 1;
-        for (int i = 0; i < bars; i++)
-        {
-            int idx = (start + (int)((double)i / bars * vis)) % 1200;
-            double y = baseY;
-            foreach (var (value, brush) in new[]
-                     {
-                         (San(Series.A(idx)), StrokeA),
-                         (San(Series.B(idx)), StrokeB),
-                         (San(Series.C(idx)), StrokeC),
-                     })
-            {
-                if (value <= 0) continue;
-                double bh = Math.Max(1, Math.Min(1, value / vmax) * (h - 2));
-                y -= bh;
-                dc.DrawRectangle(Opaque(brush), null, new Rect(i * slot + (slot - barW) / 2, y, barW, bh));
-            }
-        }
-    }
-
-    static Brush Opaque(Brush b)
-        => b is SolidColorBrush sc
-            ? new SolidColorBrush(Color.FromArgb(0xE6, sc.Color.R, sc.Color.G, sc.Color.B))
-            : b;
 
     double AutoMax(int vis)
     {

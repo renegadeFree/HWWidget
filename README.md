@@ -39,8 +39,8 @@ e un hub di controllo in stile Impostazioni di Windows.
 
 - **Widget DeepSeek** dedicato (preset "Solo DeepSeek"), con gli stessi dati del monitor di
   riferimento [Joyi-code/DeepSeekMonitorWindows](https://github.com/Joyi-code/DeepSeekMonitorWindows):
-  saldo e disponibilità, costo di oggi e del mese, un riquadro per modello (token, richieste,
-  cache hit, costo) e il grafico giornaliero a barre impilate (cache hit / miss / output).
+  saldo e disponibilità, costo di oggi e del mese, una riga compatta per modello (badge, token,
+  barra della quota, cache hit, costo) e il grafico degli ultimi 7 giorni con valori e date.
   Saldo dall'API ufficiale; uso, spesa e cache hit dalle API interne di
   `platform.deepseek.com` (l'API ufficiale non li espone), con il token di sessione del sito.
   Per prenderlo: *Hub → Impostazioni app → Chiavi → "Accedi e prendi il token (automatico)"*

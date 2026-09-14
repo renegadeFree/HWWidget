@@ -433,8 +433,18 @@ sealed class DeepSeekUsage
               "JSON.parse(localStorage.userToken).value)"
             : msg;
 
+    /// <summary>Importo con il simbolo della valuta davanti (¥ / $ / €), come nel monitor di riferimento.</summary>
     static string Money(double v, string currency)
-        => v.ToString("0.00", CultureInfo.CurrentCulture) + " " + (currency.Length > 0 ? currency : "$");
+    {
+        string symbol = currency switch
+        {
+            "CNY" => "¥",
+            "USD" => "$",
+            "EUR" => "€",
+            _ => currency.Length > 0 ? currency + " " : "$",
+        };
+        return symbol + v.ToString("0.00", CultureInfo.CurrentCulture);
+    }
 
     /// <summary>Importo formattato nella valuta del saldo.</summary>
     public static string Text(double v, string currency) => Money(v, currency);
@@ -636,7 +646,7 @@ sealed class DeepSeekUsage
 
     static string DayLabel(string date, DateTime month)
         => DateTime.TryParse(date, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
-            ? $"{d.Day}" : date;
+            ? $"{d.Day}/{d.Month}" : date;
 }
 
 sealed class DsModel

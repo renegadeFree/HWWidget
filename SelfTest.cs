@@ -197,14 +197,14 @@ static class SelfTest
             Say("ai-budget", $"budget 25 $ − speso 12 $ = {texts.First(t => t.Contains("13,00"))}");
 
             // --- DeepSeek: uso e spesa del mese (API interne della piattaforma) ---
-            var ds = new DeepSeekUsage { Currency = "CNY", Available = true, Balance = "877,70 CNY" };
+            var ds = new DeepSeekUsage { Currency = "CNY", Available = true, Balance = "877,70 CNY", BalanceValue = 877.70 };
             DeepSeekUsage.Parse(DsAmountSample, DsCostSample, ds, new DateTime(2026, 9, 1));
             Check(ds.Models.Count == 2, $"modelli DeepSeek: {ds.Models.Count} invece di 2");
             Check(Math.Abs(ds.Models[0].Tokens - 325_000_000) < 1, $"token DeepSeek {ds.Models[0].Tokens}");
             Check(Math.Abs(ds.Models[0].Requests - 6384) < 1, $"richieste DeepSeek {ds.Models[0].Requests}");
             Check(Math.Abs(ds.Models[0].HitPct - 92.3) < 0.2, $"cache hit DeepSeek {ds.Models[0].HitPct:0.0}%");
             Check(Math.Abs(ds.MonthValue - 14.15) < 0.001, $"spesa del mese DeepSeek {ds.MonthValue}");
-            Check(ds.Days.Count == 2 && Math.Abs(ds.Days[1].Hit - 2_000_000) < 1, "token per giorno DeepSeek");
+            Check(ds.Days.Count == 7 && Math.Abs(ds.Days[1].Hit - 2_000_000) < 1, "token per giorno DeepSeek");
             Check(Math.Abs(ds.Days[0].Cost - 1.50) < 0.001, $"costo del giorno DeepSeek {ds.Days[0].Cost}");
             Check(ds.Currency == "CNY" && ds.Available, "valuta/disponibilità DeepSeek");
             ds.TodayCost = "0,60 CNY";                       // solo per il disegno di controllo
@@ -225,7 +225,7 @@ static class SelfTest
             foreach (var sp in Sparklines(dsView.Root))
             {
                 Check(Math.Abs(sp.ActualHeight - sp.Height) < 1, "il grafico DeepSeek non rispetta l'altezza richiesta");
-                Check(sp.Count == 2, $"giorni nel grafico DeepSeek: {sp.Count} invece di 2");
+                Check(sp.Count == 7, $"giorni nel grafico DeepSeek: {sp.Count} invece di 7");
                 Say("deepseek-spark", $"grafico {sp.ActualWidth:0}×{sp.ActualHeight:0} con {sp.Count} giorni impilati");
             }
 
@@ -568,7 +568,25 @@ static class SelfTest
     {"type":"RESPONSE_TOKEN","amount":"50000"}]}]},
   {"date":"2026-09-13","data":[{"model":"deepseek-chat","usage":[
     {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"2000000"},
-    {"type":"RESPONSE_TOKEN","amount":"90000"}]}]}]}}}
+    {"type":"RESPONSE_TOKEN","amount":"90000"}]}]},
+  {"date":"2026-09-14","data":[{"model":"deepseek-chat","usage":[
+    {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"125000000"},
+    {"type":"PROMPT_CACHE_MISS_TOKEN","amount":"4000000"},
+    {"type":"RESPONSE_TOKEN","amount":"1200000"}]}]},
+  {"date":"2026-09-15","data":[{"model":"deepseek-chat","usage":[
+    {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"37800000"},
+    {"type":"RESPONSE_TOKEN","amount":"900000"}]},
+   {"model":"deepseek-reasoner","usage":[
+    {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"5000000"},
+    {"type":"RESPONSE_TOKEN","amount":"400000"}]}]},
+  {"date":"2026-09-16","data":[{"model":"deepseek-reasoner","usage":[
+    {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"137000000"},
+    {"type":"RESPONSE_TOKEN","amount":"2000000"}]}]},
+  {"date":"2026-09-17","data":[{"model":"deepseek-chat","usage":[
+    {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"32700000"},
+    {"type":"PROMPT_CACHE_MISS_TOKEN","amount":"800000"}]}]},
+  {"date":"2026-09-18","data":[{"model":"deepseek-chat","usage":[
+    {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"8000000"}]}]}]}}}
 """;
 
     const string DsCostSample = """
@@ -582,6 +600,11 @@ static class SelfTest
     {"type":"RESPONSE_TOKEN","amount":"0.40"}]}],
  "days":[
   {"date":"2026-09-12","data":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"1.50"}]}]},
-  {"date":"2026-09-13","data":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"2.00"}]}]}]}]}}
+  {"date":"2026-09-13","data":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"2.00"}]}]},
+  {"date":"2026-09-14","data":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"4.60"}]}]},
+  {"date":"2026-09-15","data":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"1.40"}]}]},
+  {"date":"2026-09-16","data":[{"model":"deepseek-reasoner","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"5.10"}]}]},
+  {"date":"2026-09-17","data":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"1.20"}]}]},
+  {"date":"2026-09-18","data":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"0.30"}]}]}]}]}}
 """;
 }

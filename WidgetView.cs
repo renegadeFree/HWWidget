@@ -99,7 +99,7 @@ internal sealed class WidgetView
         "net" => 2 + (c.ShowSecondary ? 1 : 0),
         "gpu" => 2 + (c.ShowSecondary ? 1 : 0),
         "ai" => Math.Max(1, c.AiProviders.Count) * 4,
-        "ds" => 1 + DsMaxModels * 2 + 3,
+        "ds" => 1 + DsMaxModels * 2 + 4,
         _ => 1 + (c.ShowSecondary ? 1 : 0),
     };
 
@@ -394,7 +394,6 @@ internal sealed class WidgetView
     // colori DeepSeek: accento del brand, poi i tre della legenda del monitor di riferimento
     static readonly Color DsAccent = Color.FromRgb(0x4D, 0x6B, 0xFE);
     static readonly Color DsHit = Color.FromRgb(0x30, 0xC4, 0x7A);
-    static readonly Color DsMiss = Color.FromRgb(0xF5, 0x9E, 0x0B);
     static readonly Color DsOut = Color.FromRgb(0xA8, 0x55, 0xF7);
     const int DsMaxModels = 3;
 
@@ -586,48 +585,59 @@ internal sealed class WidgetView
 
     internal static string Money(double v) => v.ToString("0.00", CultureInfo.CurrentCulture) + " $";
 
-    /// <summary>Sezione DeepSeek completa, come il monitor di riferimento: saldo con
-    /// disponibilità, costo di oggi e del mese, un riquadro per modello (token, richieste,
-    /// cache hit, costo) e il grafico giornaliero impilato con la legenda.</summary>
+    /// <summary>Sezione DeepSeek nel formato del monitor di riferimento: saldo con
+    /// disponibilità, costo di oggi e del mese, una riga compatta per modello (badge, nome,
+    /// token, barra e costo) e il grafico giornaliero con valori e date sopra/sotto le barre.</summary>
     IEnumerable<FrameworkElement> DsRows()
     {
         var accent = _c.ColorOf("ds") != "auto" ? BrushFromHex(_c.ColorOf("ds")) : (Brush)new SolidColorBrush(DsAccent);
+        var warm = new SolidColorBrush(_p.Warn);
+        var rows = new List<FrameworkElement>();
 
+        // ---- saldo ----
         var head = new Grid();
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var label = Txt("Saldo", 10.5 * _u, new SolidColorBrush(_p.TextDim));
+        head.Children.Add(Icon(DsGlyph.Money, 10 * _u, new SolidColorBrush(_p.TextDim), new Thickness(0, 0, 5 * _u, 0)));
+        var label = Txt("Saldo", 9 * _u, new SolidColorBrush(_p.TextDim));
         label.VerticalAlignment = VerticalAlignment.Center;
-        var chipText = Txt("—", 9.5 * _u, new SolidColorBrush(DsHit), bold: true);
+        Grid.SetColumn(label, 1);
+        head.Children.Add(label);
+        var chipText = Txt("—", 8.5 * _u, new SolidColorBrush(DsHit), bold: true);
         var chip = new Border
         {
-            CornerRadius = new CornerRadius(8 * _u),
-            Padding = new Thickness(8 * _u, 2 * _u, 8 * _u, 2 * _u),
+            CornerRadius = new CornerRadius(7 * _u),
+            Padding = new Thickness(7 * _u, 1.5 * _u, 7 * _u, 1.5 * _u),
             Background = new SolidColorBrush(Color.FromArgb(0x2E, DsHit.R, DsHit.G, DsHit.B)),
             Child = chipText,
         };
-        Grid.SetColumn(label, 0);
-        Grid.SetColumn(chip, 1);
-        head.Children.Add(label);
+        Grid.SetColumn(chip, 2);
         head.Children.Add(chip);
 
-        var balance = Txt("—", 20 * _u, accent, bold: true, mono: true);
-        balance.Margin = new Thickness(0, 2 * _u * _rs, 0, 5 * _u * _rs);
+        var amount = Txt("—", 16 * _u, accent, bold: true);
+        amount.Margin = new Thickness(0, 3 * _u, 0, 6 * _u);
         var pair = new Grid();
         pair.ColumnDefinitions.Add(Star(1));
         pair.ColumnDefinitions.Add(Star(1));
-        var (todayBox, todayText) = DsStat("Oggi", accent);
-        var (monthBox, monthText) = DsStat("Mese", accent);
-        monthBox.Margin = new Thickness(6 * _u, 0, 0, 0);
+        var (todayBox, todayText) = DsStat(DsGlyph.Sun, "Oggi");
+        var (monthBox, monthText) = DsStat(DsGlyph.Calendar, "Mese");
+        monthBox.Margin = new Thickness(5 * _u, 0, 0, 0);
         Grid.SetColumn(todayBox, 0);
         Grid.SetColumn(monthBox, 1);
         pair.Children.Add(todayBox);
         pair.Children.Add(monthBox);
 
+        var balanceBody = new StackPanel();
+        balanceBody.Children.Add(head);
+        balanceBody.Children.Add(amount);
+        balanceBody.Children.Add(pair);
+        rows.Add(DsCard(balanceBody));
+
         _binds.Add(m =>
         {
             var d = m.Ai.Deep;
-            balance.Text = d.Balance.Length > 0 ? d.Balance : "n/d";
+            amount.Text = d.Balance.Length > 0 ? Money(d.BalanceValue, d.Currency) : "n/d";
             chip.Visibility = d.Balance.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             var tone = d.Available ? DsHit : _p.Warn;
             chip.Background = new SolidColorBrush(Color.FromArgb(0x2E, tone.R, tone.G, tone.B));
@@ -637,48 +647,63 @@ internal sealed class WidgetView
             monthText.Text = d.MonthCost.Length > 0 ? d.MonthCost : "n/d";
         });
 
-        var rows = new List<FrameworkElement> { head, balance, pair };
+        // ---- un modello per riga ----
         var slots = new List<DsSlot>();
         for (int i = 0; i < DsMaxModels; i++)
         {
-            var slot = DsModelRow(accent);
+            var slot = DsModelRow(i);
             slots.Add(slot);
             rows.Add(slot.Box);
         }
 
-        // grafico giornaliero: barre impilate (cache hit, miss, output) come nel riferimento
-        var caption = new Grid { Margin = new Thickness(0, 9 * _u * _rs, 0, 0) };
-        caption.Visibility = Visibility.Collapsed;
-        caption.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        caption.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        caption.Children.Add(Txt("Consumo giornaliero", 10.5 * _u, new SolidColorBrush(_p.TextDim)));
-        var range = Txt("", 10 * _u, new SolidColorBrush(_p.TextDim), align: TextAlignment.Right);
-        Grid.SetColumn(range, 1);
-        caption.Children.Add(range);
-        rows.Add(caption);
+        // ---- andamento giornaliero ----
+        var chartHead = new Grid { Margin = new Thickness(0, 0, 0, 4 * _u) };
+        chartHead.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        chartHead.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        chartHead.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        chartHead.Children.Add(Icon(DsGlyph.Trend, 10 * _u, new SolidColorBrush(_p.TextDim), new Thickness(0, 0, 5 * _u, 0)));
+        var chartTitle = Txt("Consumo", 9 * _u, new SolidColorBrush(_p.TextDim));
+        chartTitle.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(chartTitle, 1);
+        chartHead.Children.Add(chartTitle);
+        var chartTotal = Txt("", 9 * _u, new SolidColorBrush(_p.TextDim), align: TextAlignment.Right);
+        chartTotal.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(chartTotal, 2);
+        chartHead.Children.Add(chartTotal);
 
-        var spark = new Sparkline
+        var bars = new Sparkline
         {
             Series = Shared("ds.days"),
             WindowSamples = 30,
-            Stacked = true,
-            VMax = 0,                       // scala automatica sulla somma dei tre valori
+            VMax = 0,
             GraphStyle = GraphStyle.Bars,
-            StrokeA = new SolidColorBrush(DsHit),
-            StrokeB = new SolidColorBrush(DsMiss),
-            StrokeC = new SolidColorBrush(DsOut),
-            Height = 44 * _u * _c.GraphHeightScale,
-            Margin = new Thickness(-CardPad, 5 * _u * _rs, -CardPad, 0),
-            Visibility = Visibility.Collapsed,
+            StrokeA = accent,
+            Height = 34 * _u * _c.GraphHeightScale,
+            Margin = new Thickness(0, 2 * _u, 0, 0),
         };
-        rows.Add(spark);
-        var legend = DsLegend();
-        legend.Visibility = Visibility.Collapsed;
-        rows.Add(legend);
-        var hint = Txt("", 9.5 * _u, new SolidColorBrush(_p.TextDim));
+        var chartValues = new Grid { Margin = new Thickness(0, 0, 0, 2 * _u) };
+        var chartDates = new Grid();
+        var chartBody = new StackPanel();
+        chartBody.Children.Add(chartHead);
+        chartBody.Children.Add(chartValues);
+        chartBody.Children.Add(bars);
+        chartBody.Children.Add(chartDates);
+        var chartCard = DsCard(chartBody);
+        chartCard.Visibility = Visibility.Collapsed;
+        rows.Add(chartCard);
+
+        var hint = Txt("", 9 * _u, new SolidColorBrush(_p.TextDim), align: TextAlignment.Center);
         hint.TextWrapping = TextWrapping.Wrap;
-        hint.Margin = new Thickness(0, 6 * _u * _rs, 0, 0);
+        hint.Margin = new Thickness(0, 2 * _u, 0, 0);
         rows.Add(hint);
+
+        _binds.Add(m =>
+        {
+            var d = m.Ai.Deep;
+            // nel widget una riga corta: i dettagli (e il motivo) stanno nell'hub
+            hint.Text = d.HasUsage ? "" : "token di utilizzo non impostato o non valido · Hub → Impostazioni app";
+            hint.Visibility = hint.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        });
 
         DateTime? seen = null;
         _binds.Add(m =>
@@ -686,17 +711,8 @@ internal sealed class WidgetView
             var d = m.Ai.Deep;
             if (seen == d.FetchedUtc) return;
             seen = d.FetchedUtc;
-            var series = Shared("ds.days");
-            series.Clear();
-            foreach (var day in d.Days) series.Push(day.Hit, day.Miss, day.Out);
-            spark.WindowSamples = Math.Max(2, d.Days.Count);
-            spark.Visibility = d.Days.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            legend.Visibility = spark.Visibility;
-            caption.Visibility = spark.Visibility;
-            if (d.Days.Count > 0) range.Text = $"{d.Days[0].Label} – {d.Days[^1].Label}";
-            // nel widget una riga corta: i dettagli (e il motivo) stanno nell'hub
-            hint.Text = d.HasUsage ? "" : "token di utilizzo non impostato o non valido · Hub → Impostazioni app";
-            hint.Visibility = hint.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            double total = d.Models.Sum(x => x.Tokens);
             for (int i = 0; i < slots.Count; i++)
             {
                 var s = slots[i];
@@ -704,122 +720,195 @@ internal sealed class WidgetView
                 var model = d.Models[i];
                 s.Box.Visibility = Visibility.Visible;
                 s.Name.Text = model.Name;
-                s.Cost.Text = DeepSeekUsage.Text(model.Cost, d.Currency);
-                s.Tokens.Text = AiUsage.Tokens(model.Tokens);
-                s.Requests.Text = model.Requests.ToString("N0", CultureInfo.CurrentCulture);
-                double pct = Math.Clamp(model.HitPct, 0, 100);
-                s.Percent.Text = $"{pct:0}%";
-                double w = s.Bar.ActualWidth > 2 ? s.Bar.ActualWidth : 120;
-                s.Fill.Width = Math.Max(0, pct / 100) * w;
+                s.Cost.Text = Money(model.Cost, d.Currency);
+                s.Tokens.Text = CompactTokens(model.Tokens) + " token";
+                s.Hit.Text = $"{model.HitPct:0}% cache hit";
+                double share = total > 0 ? model.Tokens / total : 0;
+                double w = s.Bar.ActualWidth > 2 ? s.Bar.ActualWidth : 90;
+                s.Fill.Width = Math.Max(2, Math.Min(1, share) * w);
             }
-            spark.Refresh();
+
+            // ultimi 7 giorni come nel riferimento: le colonne restano leggibili con le etichette
+            var recent = d.Days.Count > 7 ? d.Days.GetRange(d.Days.Count - 7, 7) : d.Days;
+            var series = Shared("ds.days");
+            series.Clear();
+            foreach (var day in recent) series.Push(day.Tokens);
+            bars.WindowSamples = Math.Max(2, recent.Count);
+            chartCard.Visibility = recent.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            chartTotal.Text = recent.Count > 0 ? "Totale " + CompactTokens(recent.Sum(x => x.Tokens)) : "";
+            FillLabels(chartValues, recent, true);
+            FillLabels(chartDates, recent, false);
+            bars.Refresh();
         });
         return rows;
+    }
+
+    void FillLabels(Grid host, List<DsDay> days, bool values)
+    {
+        host.Children.Clear();
+        host.ColumnDefinitions.Clear();
+        if (days.Count == 0 || days.Count > 12) return;
+        for (int i = 0; i < days.Count; i++)
+        {
+            host.ColumnDefinitions.Add(Star(1));
+            var day = days[i];
+            var t = Txt(values ? ChartLabel(day.Tokens) : day.Label, 7.5 * _u,
+                        new SolidColorBrush(_p.TextDim), align: TextAlignment.Center);
+            TextOptions.SetTextFormattingMode(t, TextFormattingMode.Ideal);
+            Grid.SetColumn(t, i);
+            host.Children.Add(t);
+        }
+    }
+
+    /// <summary>Card interna della sezione DeepSeek (più chiara del fondo del widget).</summary>
+    Border DsCard(FrameworkElement content)
+    {
+        var b = Surface(8 * _u, Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF),
+                        new Thickness(9 * _u, 7 * _u, 9 * _u, 7 * _u), new Thickness(0, 0, 0, 6 * _u * _rs));
+        b.Child = content;
+        return b;
+    }
+
+    /// <summary>Riquadro "Oggi" / "Mese" con l'importo.</summary>
+    (FrameworkElement Box, TextBlock Value) DsStat(string glyph, string label)
+    {
+        var head = new StackPanel { Orientation = Orientation.Horizontal };
+        head.Children.Add(Icon(glyph, 9 * _u, new SolidColorBrush(_p.Warn), new Thickness(0, 0, 4 * _u, 0)));
+        head.Children.Add(Txt(label, 8.5 * _u, new SolidColorBrush(_p.TextDim)));
+        var stack = new StackPanel();
+        stack.Children.Add(head);
+        var value = Txt("—", 11 * _u, new SolidColorBrush(_p.Warn), bold: true);
+        value.Margin = new Thickness(0, 2 * _u, 0, 0);
+        stack.Children.Add(value);
+        var box = Surface(6 * _u, Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF),
+                          new Thickness(7 * _u, 5 * _u, 7 * _u, 6 * _u), new Thickness(0));
+        box.Child = stack;
+        return (box, value);
+    }
+
+    /// <summary>Riga di un modello: badge, nome, token, barra della quota e costo.</summary>
+    DsSlot DsModelRow(int index)
+    {
+        var tone = index switch
+        {
+            0 => DsAccent,
+            1 => DsOut,
+            _ => DsHit,
+        };
+        var modelColor = new SolidColorBrush(tone);
+
+        var badge = new Border
+        {
+            Width = 19 * _u,
+            Height = 19 * _u,
+            CornerRadius = new CornerRadius(9.5 * _u),
+            Background = new SolidColorBrush(Color.FromArgb(0x2E, tone.R, tone.G, tone.B)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = Icon(DsGlyph.Model, 9 * _u, modelColor),
+        };
+        var badgeText = (TextBlock)badge.Child;
+        badgeText.HorizontalAlignment = HorizontalAlignment.Center;
+
+        var name = Txt("—", 10.5 * _u, new SolidColorBrush(_p.Text), bold: true);
+        var cost = Txt("—", 10.5 * _u, new SolidColorBrush(_p.Text), bold: true, align: TextAlignment.Right);
+        var tokens = Txt("—", 8.5 * _u, new SolidColorBrush(_p.TextDim));
+        var hit = Txt("—", 8.5 * _u, modelColor, align: TextAlignment.Right);
+
+        var track = new Border
+        {
+            Height = 3.5 * _u,
+            CornerRadius = new CornerRadius(2 * _u),
+            Background = new SolidColorBrush(_p.Track),
+        };
+        var fill = new Border
+        {
+            Height = 3.5 * _u,
+            Width = 0,
+            CornerRadius = new CornerRadius(2 * _u),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Background = modelColor,
+        };
+        var bar = new Grid { Margin = new Thickness(0, 4 * _u, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        bar.Children.Add(track);
+        bar.Children.Add(fill);
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRowSpan(badge, 2);
+        badge.Margin = new Thickness(0, 0, 7 * _u, 0);
+        Grid.SetColumn(badge, 0);
+        grid.Children.Add(badge);
+        Grid.SetColumn(name, 1);
+        grid.Children.Add(name);
+        Grid.SetColumn(cost, 2);
+        grid.Children.Add(cost);
+        tokens.Margin = new Thickness(0, 1 * _u, 0, 0);
+        Grid.SetRow(tokens, 1);
+        Grid.SetColumn(tokens, 1);
+        grid.Children.Add(tokens);
+        var right = new StackPanel { Margin = new Thickness(6 * _u, 1 * _u, 0, 0) };
+        right.Children.Add(hit);
+        Grid.SetRow(right, 1);
+        Grid.SetColumn(right, 2);
+        grid.Children.Add(right);
+        Grid.SetRow(bar, 2);
+        Grid.SetColumn(bar, 1);
+        Grid.SetColumnSpan(bar, 2);
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.Children.Add(bar);
+
+        var box = DsCard(grid);
+        box.Margin = new Thickness(0, 0, 0, 5 * _u * _rs);
+        return new DsSlot { Box = box, Name = name, Cost = cost, Tokens = tokens, Hit = hit, Bar = bar, Fill = fill };
     }
 
     sealed class DsSlot
     {
         public FrameworkElement Box = null!;
-        public TextBlock Name = null!, Cost = null!, Tokens = null!, Requests = null!, Percent = null!;
+        public TextBlock Name = null!, Cost = null!, Tokens = null!, Hit = null!;
         public Grid Bar = null!;
         public Border Fill = null!;
     }
 
-    /// <summary>Riquadro di un modello: nome, costo, token, richieste e barra cache hit.</summary>
-    DsSlot DsModelRow(Brush accent)
-    {
-        var inner = new StackPanel();
-        var top = new Grid();
-        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var name = Txt("—", 12.5 * _u, accent, bold: true);
-        var cost = Txt("—", 12.5 * _u, new SolidColorBrush(_p.Text), bold: true, mono: true, align: TextAlignment.Right);
-        Grid.SetColumn(cost, 1);
-        top.Children.Add(name);
-        top.Children.Add(cost);
-        inner.Children.Add(top);
+    /// <summary>Token compatti come nel riferimento (35,3M / 125M / 1,0K).</summary>
+    internal static string CompactTokens(double v) => v >= 1e9 ? $"{v / 1e9:0.#}G"
+        : v >= 1e6 ? $"{v / 1e6:0.#}M"
+        : v >= 1e3 ? $"{v / 1e3:0.#}K"
+        : $"{v:0}";
 
-        var stats = new Grid { Margin = new Thickness(0, 5 * _u * _rs, 0, 0) };
-        stats.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        stats.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var tokens = Txt("—", 11.5 * _u, new SolidColorBrush(_p.Text), mono: true, bold: true);
-        var requests = Txt("—", 10.5 * _u, new SolidColorBrush(_p.TextDim), mono: true, align: TextAlignment.Right);
-        Grid.SetColumn(requests, 1);
-        stats.Children.Add(tokens);
-        stats.Children.Add(requests);
-        inner.Children.Add(stats);
+    /// <summary>Importo con il simbolo della valuta (¥ / $), come nel riferimento.</summary>
+    internal static string Money(double v, string currency) => DeepSeekUsage.Text(v, currency);
 
-        var track = new Border
+    /// <summary>Valore compatto per le etichette sopra le barre (senza decimali sopra 100).</summary>
+    internal static string ChartLabel(double v) => v >= 1e9 ? $"{v / 1e9:0.#}G"
+        : v >= 100e6 ? $"{v / 1e6:0}M"
+        : v >= 1e6 ? $"{v / 1e6:0.#}M"
+        : v >= 1e3 ? $"{v / 1e3:0.#}K"
+        : $"{v:0}";
+
+    /// <summary>Icona Segoe MDL2 con margine.</summary>
+    TextBlock Icon(string glyph, double size, Brush color, Thickness margin = default)
+        => new()
         {
-            Height = 8 * _u * _rs,
-            CornerRadius = new CornerRadius(4 * _u * _rs),
-            Background = new SolidColorBrush(_p.Track),
+            Text = glyph,
+            FontFamily = new FontFamily(IconFont),
+            FontSize = size,
+            Foreground = color,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = margin,
         };
-        var fill = new Border
-        {
-            Height = 8 * _u * _rs,
-            Width = 0,
-            CornerRadius = new CornerRadius(4 * _u * _rs),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Background = new SolidColorBrush(DsHit),
-        };
-        var percent = Txt("—", 10 * _u, new SolidColorBrush(DsHit), bold: true, mono: true, align: TextAlignment.Right);
-        var bar = new Grid { Margin = new Thickness(0, 5 * _u * _rs, 0, 0) };
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var host = new Grid();
-        host.Children.Add(track);
-        host.Children.Add(fill);
-        Grid.SetColumn(host, 0);
-        Grid.SetColumn(percent, 1);
-        bar.Children.Add(host);
-        bar.Children.Add(percent);
-        inner.Children.Add(bar);
 
-        var box = Surface(8 * _u, Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF),
-                          new Thickness(10 * _u, 8 * _u * _rs, 10 * _u, 9 * _u * _rs),
-                          new Thickness(0, 7 * _u * _rs, 0, 0));
-        box.Child = inner;
-        return new DsSlot
-        {
-            Box = box, Name = name, Cost = cost, Tokens = tokens,
-            Requests = requests, Percent = percent, Bar = host, Fill = fill,
-        };
-    }
-
-    /// <summary>Riquadro "Oggi" / "Mese" con l'importo.</summary>
-    (FrameworkElement Box, TextBlock Value) DsStat(string label, Brush accent)
+    static class DsGlyph
     {
-        var stack = new StackPanel();
-        stack.Children.Add(Txt(label, 9.5 * _u, new SolidColorBrush(_p.TextDim), bold: true));
-        var value = Txt("—", 11 * _u, accent, bold: true, mono: true);
-        value.Margin = new Thickness(0, 2 * _u, 0, 0);
-        stack.Children.Add(value);
-        var box = Surface(7 * _u, Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF),
-                          new Thickness(7 * _u, 6 * _u * _rs, 7 * _u, 7 * _u * _rs), new Thickness(0));
-        box.Child = stack;
-        return (box, value);
-    }
-
-    FrameworkElement DsLegend()
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6 * _u * _rs, 0, 0) };
-        foreach (var (color, text) in new[] { (DsHit, "cache hit"), (DsMiss, "miss"), (DsOut, "output") })
-        {
-            var item = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 10 * _u, 0) };
-            item.Children.Add(new Border
-            {
-                Width = 6 * _u,
-                Height = 6 * _u,
-                CornerRadius = new CornerRadius(3 * _u),
-                Background = new SolidColorBrush(color),
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 4 * _u, 0),
-            });
-            item.Children.Add(Txt(text, 9.5 * _u, new SolidColorBrush(_p.TextDim)));
-            row.Children.Add(item);
-        }
-        return row;
+        public const string Money = "\uE8C7";
+        public const string Sun = "\uE706";
+        public const string Calendar = "\uE787";
+        public const string Trend = "\uE9D2";
+        public const string Model = "\uE945";
     }
 
     /// <summary>Colour of a meter: the fixed per-element colour when set, otherwise the
