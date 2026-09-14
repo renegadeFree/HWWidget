@@ -51,19 +51,32 @@ internal sealed class WidgetView
     readonly double _u;
     readonly double _ts;   // text scale * global scale
     readonly double _rs;   // row scale * global scale
+    /// <summary>Pixel in più per ogni grafico: riempie l'altezza libera della finestra
+    /// (i grafici sono la parte elastica, testi e righe restano della misura scelta).</summary>
+    readonly double _extraGraph;
+    /// <summary>Fattore di adattamento alla finestra: scala anche i pochi valori fissi
+    /// (padding delle tessere, margini), altrimenti rimpicciolendo resterebbero fuori.</summary>
+    readonly double _fit;
+    int _graphs;
     readonly List<Action<Metrics>> _binds = new();
 
     public FrameworkElement Root { get; }
 
-    public WidgetView(WidgetConfig c, Palette p, Dictionary<string, Series> store, double widthDip)
+    /// <summary>Number of graphs built: the window uses it to spread the spare height.</summary>
+    public int GraphCount => _graphs;
+
+    public WidgetView(WidgetConfig c, Palette p, Dictionary<string, Series> store, double widthDip,
+                      double fit = 1, double extraGraph = 0)
     {
         _c = c;
         _p = p;
         _store = store;
         _samples = (int)Math.Max(4, Math.Round(c.GraphSeconds / c.IntervalSeconds));
-        _ts = c.TextScale * c.UiScale;
-        _rs = c.RowScale * c.UiScale;
-        _u = PanelUnit(c, widthDip);
+        _ts = c.TextScale * c.UiScale * fit;
+        _rs = c.RowScale * c.UiScale * fit;
+        _u = PanelUnit(c, widthDip) * fit;
+        _extraGraph = extraGraph;
+        _fit = fit;
         Root = c.Layout switch
         {
             "cards" => BuildCards(),
@@ -72,6 +85,13 @@ internal sealed class WidgetView
             "panelgraph" => BuildPanel(true),
             _ => BuildRows(),
         };
+    }
+
+    /// <summary>Altezza di un grafico: quella di progetto più la sua quota di spazio libero.</summary>
+    double GraphHeight(double height)
+    {
+        _graphs++;
+        return height + _extraGraph;
     }
 
     public void Bind(Metrics m)
@@ -134,7 +154,7 @@ internal sealed class WidgetView
             StrokeA = strokeA,
             StrokeB = strokeB,
         };
-        if (height > 0) g.Height = height;
+        g.Height = GraphHeight(height > 0 ? height : 20);
         return g;
     }
 
@@ -267,7 +287,8 @@ internal sealed class WidgetView
         var stack = new StackPanel();
         foreach (string el in _c.Elements)
         {
-            var grid = new Grid { Height = 30 * _rs, Background = Brushes.Transparent };
+            // MinHeight: la riga può crescere quando il grafico prende l'altezza libera
+            var grid = new Grid { MinHeight = 30 * _rs, Background = Brushes.Transparent };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(Star(1));
             grid.ColumnDefinitions.Add(Star(_c.GraphWidthScale));
@@ -333,7 +354,7 @@ internal sealed class WidgetView
 
             for (int i = 0; i < defs.lines.Count; i++)
             {
-                var g = new Grid { Height = 34 * _rs };
+                var g = new Grid { MinHeight = 34 * _rs };
                 g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 g.ColumnDefinitions.Add(Star(_c.GraphWidthScale));
 
@@ -358,7 +379,8 @@ internal sealed class WidgetView
                 rows.Add((sp, idx));
             }
 
-            var card = Surface(10, _p.Card, new Thickness(12, 8, 12, 10), new Thickness(0, 0, 0, 6));
+            var card = Surface(10, _p.Card, new Thickness(12 * _fit, 8 * _fit, 12 * _fit, 10 * _fit),
+                               new Thickness(0, 0, 0, 6 * _fit));
             card.Child = inner;
             stack.Children.Add(card);
 
@@ -407,7 +429,7 @@ internal sealed class WidgetView
     double CardBottom => 4 * _u * _rs;
     /// <summary>Distanza del grafico dal bordo inferiore della card: senza, la linea di base
     /// finisce a contatto con il bordo del box.</summary>
-    const double GraphClearance = 3;
+    double GraphClearance => 3 * _fit;
 
     /// <summary>Green under 60%, amber to 85%, red above — temperatures shift the bands.</summary>
     SolidColorBrush Level(double value, bool isTemp)
@@ -693,7 +715,7 @@ internal sealed class WidgetView
             VMax = 0,
             GraphStyle = GraphStyle.Bars,
             StrokeA = accent,
-            Height = 34 * _u * _c.GraphHeightScale,
+            Height = GraphHeight(34 * _u * _c.GraphHeightScale),
             Margin = new Thickness(0, 2 * _u, 0, 0),
         };
         var chartValues = new Grid { Margin = new Thickness(0, 0, 0, 2 * _u) };
@@ -1119,14 +1141,14 @@ internal sealed class WidgetView
 
             var track = new Border
             {
-                Height = 3,
+                Height = 3 * _fit,
                 CornerRadius = new CornerRadius(2),
                 Background = new SolidColorBrush(_p.Track),
-                Margin = new Thickness(0, 5, 0, 5),
+                Margin = new Thickness(0, 5 * _fit, 0, 5 * _fit),
             };
             var fill = new Border
             {
-                Height = 3,
+                Height = 3 * _fit,
                 Width = 0,
                 CornerRadius = new CornerRadius(2),
                 HorizontalAlignment = HorizontalAlignment.Left,
@@ -1138,7 +1160,7 @@ internal sealed class WidgetView
 
             var graph = el == "ai" ? null : Graph($"tiles.{el}.main", new SolidColorBrush(_p.Text), Brushes.Transparent, 100,
                                                   18 * _ts * _c.GraphHeightScale);
-            if (graph != null) graph.Margin = new Thickness(0, 2, 0, 0);
+            if (graph != null) graph.Margin = new Thickness(0, 2 * _fit, 0, 0);
 
             var inner = new StackPanel();
             inner.Children.Add(icon);
@@ -1152,7 +1174,8 @@ internal sealed class WidgetView
             }
             inner.Children.Add(sub);
 
-            var tile = Surface(10, _p.Card, new Thickness(10, 8, 10, 10), new Thickness(4));
+            var tile = Surface(10, _p.Card,
+                               new Thickness(10 * _fit, 8 * _fit, 10 * _fit, 10 * _fit), new Thickness(4 * _fit));
             tile.Child = inner;
             grid.Children.Add(tile);
 

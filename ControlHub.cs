@@ -225,7 +225,7 @@ sealed class ControlHub : Window
         for (int i = 0; i < _app.Widgets.Count; i++)
         {
             var w = _app.Widgets[i];
-            _nav.Children.Add(NavItem("\uE9D9", $"Widget “{w.Config.Id}”", LayoutName(w.Config.Layout), i + 1));
+            _nav.Children.Add(NavItem("\uE9D9", w.Config.DisplayName, LayoutName(w.Config.Layout), i + 1));
         }
         _nav.Children.Add(new TextBlock
         {
@@ -280,22 +280,22 @@ sealed class ControlHub : Window
     void BuildAddPage()
     {
         PageHeader("Aggiungi widget", "Crea un nuovo pannello: puoi averne quanti vuoi, ognuno con posizione, dimensioni e contenuto propri.");
-        SubTitle("Preset rapidi");
-        _content.Children.Add(Card("\uE9D9", "Tutto", "CPU, GPU, RAM, disco e rete in un unico pannello.",
+        SubTitle("Scegli il widget da creare");
+        _content.Children.Add(Card("\uE9D9", "TUTTO", "CPU, GPU, RAM, disco e rete in un unico pannello.",
             TextButton("Crea", () => Add(null), accent: true)));
-        _content.Children.Add(Card("\uE950", "Solo CPU", "Utilizzo e frequenza della CPU.",
+        _content.Children.Add(Card("\uE950", "CPU", "Utilizzo e frequenza della CPU.",
             TextButton("Crea", () => Add("cpu"))));
-        _content.Children.Add(Card("\uE7FC", "Solo GPU", "Utilizzo, temperatura e VRAM della scheda video.",
+        _content.Children.Add(Card("\uE7FC", "GPU", "Utilizzo, temperatura e VRAM della scheda video.",
             TextButton("Crea", () => Add("gpu"))));
-        _content.Children.Add(Card("\uE964", "Solo RAM", "Memoria utilizzata e frequenza.",
+        _content.Children.Add(Card("\uE964", "RAM", "Memoria utilizzata e frequenza.",
             TextButton("Crea", () => Add("ram"))));
-        _content.Children.Add(Card("\uE968", "Solo rete", "Upload e download dell'adattatore attivo.",
+        _content.Children.Add(Card("\uE968", "RETE", "Upload e download dell'adattatore attivo.",
             TextButton("Crea", () => Add("net"))));
-        _content.Children.Add(Card("\uE9D9", "CPU + GPU", "Due schede con i dati principali.",
+        _content.Children.Add(Card("\uE9D9", "CPU+GPU", "Due schede con i dati principali.",
             TextButton("Crea", () => Add("cpugpu"))));
-        _content.Children.Add(Card("\uE945", "Solo AI", "Budget rimasto, budget consumato e token totali di DeepSeek, ChatGPT e Claude (solo numeri).",
+        _content.Children.Add(Card("\uE945", "AI", "Budget rimasto, budget consumato e token totali di DeepSeek, ChatGPT e Claude (solo numeri).",
             TextButton("Crea", () => Add("ai"))));
-        _content.Children.Add(Card("\uE9D2", "Solo DeepSeek", "Saldo, spesa di oggi e del mese, token e cache hit per modello, con grafico giornaliero.",
+        _content.Children.Add(Card("\uE9D2", "DEEPSEEK", "Saldo, spesa di oggi e del mese, token e cache hit per modello, con grafico giornaliero.",
             TextButton("Crea", () => Add("ds"), accent: true)));
     }
 
@@ -429,7 +429,7 @@ sealed class ControlHub : Window
     void BuildWidgetPage(MainWindow w)
     {
         var c = w.Config;
-        PageHeader($"Widget “{c.Id}”", "Modifiche applicate subito: quello che cambi qui si vede immediatamente sul widget.");
+        PageHeader($"Widget “{c.DisplayName}”", "Modifiche applicate subito: quello che cambi qui si vede immediatamente sul widget.");
 
         SubTitle("Azioni");
         _content.Children.Add(Card("\uE8A7", "Porta in primo piano", "Mostra e attiva questo widget.",
@@ -444,30 +444,32 @@ sealed class ControlHub : Window
             })));
 
         SubTitle("Composizione");
+        _content.Children.Add(Card("\uE8AC", "Nome del widget", "Compare nell'elenco a sinistra. Vuoto = nome dedotto dagli elementi visibili.",
+            NameBox(c)));
         _content.Children.Add(Card("\uE8A9", "Layout", "Come sono disegnati i dati.",
-            Combo(Layouts, LayoutNames, () => c.Layout, v => { c.Layout = v; Apply(w, true); })));
+            Combo(Layouts, LayoutNames, () => c.Layout, v => { c.Layout = v; Apply(w); })));
         _content.Children.Add(Card("\uE790", "Tema", "Chiaro, scuro o come Windows.",
             Combo(Themes, ThemeNames, () => c.Theme, v => { c.Theme = v; Apply(w); })));
         _content.Children.Add(Card("\uE7E6", "Materiale", "Acrylic sfocato è quello che resta sfocato anche senza focus.",
             Combo(Backdrops, BackdropNames, () => c.Backdrop, v => { c.Backdrop = v; Apply(w); })));
         _content.Children.Add(Expander("\uE71D", "Elementi visibili", "Scegli cosa mostrare in questo widget.",
-            ("\uE968", "Rete", Switch(() => c.ShowNet, v => { c.ShowNet = v; Apply(w, true); })),
-            ("\uE950", "CPU", Switch(() => c.ShowCpu, v => { c.ShowCpu = v; Apply(w, true); })),
-            ("\uE7FC", "GPU", Switch(() => c.ShowGpu, v => { c.ShowGpu = v; Apply(w, true); })),
-            ("\uE964", "RAM", Switch(() => c.ShowRam, v => { c.ShowRam = v; Apply(w, true); })),
-            ("\uEDA2", "Disco", Switch(() => c.ShowDisk, v => { c.ShowDisk = v; Apply(w, true); })),
-            ("\uE9D2", "DeepSeek (saldo, uso e spesa del mese)", Switch(() => c.ShowDs, v => { c.ShowDs = v; Apply(w, true); })),
-            ("\uE9D2", "Metriche secondarie", Switch(() => c.ShowSecondary, v => { c.ShowSecondary = v; Apply(w, true); })),
-            ("\uE8A7", "Titolo “HW Widget” nel pannello", Switch(() => c.ShowTitle, v => { c.ShowTitle = v; Apply(w, true); }))));
+            ("\uE968", "Rete", Switch(() => c.ShowNet, v => { c.ShowNet = v; Apply(w); })),
+            ("\uE950", "CPU", Switch(() => c.ShowCpu, v => { c.ShowCpu = v; Apply(w); })),
+            ("\uE7FC", "GPU", Switch(() => c.ShowGpu, v => { c.ShowGpu = v; Apply(w); })),
+            ("\uE964", "RAM", Switch(() => c.ShowRam, v => { c.ShowRam = v; Apply(w); })),
+            ("\uEDA2", "Disco", Switch(() => c.ShowDisk, v => { c.ShowDisk = v; Apply(w); })),
+            ("\uE9D2", "DeepSeek (saldo, uso e spesa del mese)", Switch(() => c.ShowDs, v => { c.ShowDs = v; Apply(w); })),
+            ("\uE9D2", "Metriche secondarie", Switch(() => c.ShowSecondary, v => { c.ShowSecondary = v; Apply(w); })),
+            ("\uE8A7", "Titolo “HW Widget” nel pannello", Switch(() => c.ShowTitle, v => { c.ShowTitle = v; Apply(w); }))));
         _content.Children.Add(Expander("\uE945", "Sezione AI", "Solo numeri, senza grafici: budget rimasto, budget consumato e token totali. " +
                                                                  "Spegnendo un fornitore le sue righe spariscono dal widget.",
-            ("\uE945", "Mostra la sezione AI", Switch(() => c.ShowAi, v => { c.ShowAi = v; Apply(w, true); })),
+            ("\uE945", "Mostra la sezione AI", Switch(() => c.ShowAi, v => { c.ShowAi = v; Apply(w); })),
             ("\uE9D9", "DeepSeek (saldo API)", Switch(() => c.AiProviders.Contains("deepseek"),
-                v => { ToggleProvider(c, "deepseek", v); Apply(w, true); })),
+                v => { ToggleProvider(c, "deepseek", v); Apply(w); })),
             ("\uE9D9", "ChatGPT (spesa API + token dei log)", Switch(() => c.AiProviders.Contains("openai"),
-                v => { ToggleProvider(c, "openai", v); Apply(w, true); })),
+                v => { ToggleProvider(c, "openai", v); Apply(w); })),
             ("\uE9D9", "Claude (spesa API + token dei log)", Switch(() => c.AiProviders.Contains("anthropic"),
-                v => { ToggleProvider(c, "anthropic", v); Apply(w, true); })),
+                v => { ToggleProvider(c, "anthropic", v); Apply(w); })),
             ("\uE8C7", "Budget mensile DeepSeek (USD)", BudgetBox(c, "deepseek", w)),
             ("\uE8C7", "Budget mensile ChatGPT (USD)", BudgetBox(c, "openai", w)),
             ("\uE8C7", "Budget mensile Claude (USD)", BudgetBox(c, "anthropic", w))));
@@ -476,11 +478,11 @@ sealed class ControlHub : Window
 
         SubTitle("Dimensioni");
         _content.Children.Add(Card("\uE8A9", "Scala generale", "Ingrandisce o riduce tutto il widget.",
-            Slider(0.5, 2.5, 0.05, () => c.UiScale, v => { c.UiScale = v; Apply(w, true); })));
+            Slider(0.5, 2.5, 0.05, () => c.UiScale, v => { c.UiScale = v; Apply(w); })));
         _content.Children.Add(Card("\uE8D3", "Dimensione testo", "Solo i testi.",
-            Slider(0.6, 2.2, 0.05, () => c.TextScale, v => { c.TextScale = v; Apply(w, true); })));
+            Slider(0.6, 2.2, 0.05, () => c.TextScale, v => { c.TextScale = v; Apply(w); })));
         _content.Children.Add(Card("\uE7C4", "Altezza elementi", "Spazio verticale delle righe.",
-            Slider(0.6, 3, 0.05, () => c.RowScale, v => { c.RowScale = v; Apply(w, true); })));
+            Slider(0.6, 3, 0.05, () => c.RowScale, v => { c.RowScale = v; Apply(w); })));
         _content.Children.Add(Card("\uE7C4", "Larghezza finestra", "In pixel.",
             Slider(180, 1200, 10, () => w.Width, v => w.Width = v)));
         _content.Children.Add(Card("\uE7C4", "Altezza finestra", "In pixel.",
@@ -528,11 +530,8 @@ sealed class ControlHub : Window
         Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => { Rebuild(); _page = _app.Widgets.Count; ShowPage(_page); }));
     }
 
-    void Apply(MainWindow w, bool resize = false)
-    {
-        w.ApplyConfig(resize);
-        if (resize) w.FitHeightNow();
-    }
+    /// <summary>Modifiche live: si applicano subito, senza toccare la misura della finestra.</summary>
+    static void Apply(MainWindow w) => w.ApplyConfig();
 
     // ---------- building blocks ----------
 
@@ -672,6 +671,29 @@ sealed class ControlHub : Window
         else c.AiProviders.Remove(provider);
     }
 
+    /// <summary>Nome del widget. Si salva su Invio o uscendo dal campo; l'elenco a sinistra
+    /// si aggiorna dopo, così il clic sul controllo successivo non si perde.</summary>
+    FrameworkElement NameBox(WidgetConfig c)
+    {
+        var box = new TextBox
+        {
+            Text = c.Name,
+            Width = 176,
+            VerticalAlignment = VerticalAlignment.Center,
+            Style = (Style)Resources["HubTextBox"],
+        };
+        void Commit()
+        {
+            if (c.Name == box.Text.Trim()) return;
+            c.Name = box.Text.Trim();
+            c.Save();
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(Rebuild));
+        }
+        box.KeyDown += (_, e) => { if (e.Key == Key.Enter) Commit(); };
+        box.LostFocus += (_, _) => Commit();
+        return box;
+    }
+
     /// <summary>Budget mensile (USD) usato dal widget per il "budget rimasto". 0 = non impostato.</summary>
     FrameworkElement BudgetBox(WidgetConfig c, string provider, MainWindow w)
         => NumberBox(() => c.AiBudget(provider),
@@ -748,8 +770,8 @@ sealed class ControlHub : Window
             var up = new Button { Content = "\uE70E", Style = (Style)Resources["HubIconButton"], Margin = new Thickness(0, 0, 6, 0), ToolTip = "Sposta su" };
             var down = new Button { Content = "\uE70D", Style = (Style)Resources["HubIconButton"], ToolTip = "Sposta giù" };
             string k = key;
-            up.Click += (_, _) => { c.MoveElement(k, -1); Apply(w, true); Rebuild(); };
-            down.Click += (_, _) => { c.MoveElement(k, +1); Apply(w, true); Rebuild(); };
+            up.Click += (_, _) => { c.MoveElement(k, -1); Apply(w); Rebuild(); };
+            down.Click += (_, _) => { c.MoveElement(k, +1); Apply(w); Rebuild(); };
             row.Children.Add(up);
             row.Children.Add(down);
             yield return (glyph, name, row);

@@ -80,6 +80,17 @@ sealed class AppController : IDisposable
     {
         string id = WidgetConfig.NewId();
         var c = new WidgetConfig { Id = id };
+        c.Name = preset switch
+        {
+            "cpu" => "CPU",
+            "gpu" => "GPU",
+            "ram" => "RAM",
+            "net" => "RETE",
+            "cpugpu" => "CPU+GPU",
+            "ai" => "AI",
+            "ds" => "DEEPSEEK",
+            _ => "TUTTO",
+        };
         switch (preset)
         {
             case "cpu": c.ShowNet = false; c.ShowGpu = false; c.ShowRam = false; c.Layout = "tiles"; break;
@@ -331,13 +342,14 @@ sealed class TrayIcon : IDisposable
         }
 
         var nuovo = new MenuItem { Header = "Nuovo widget" };
-        nuovo.Items.Add(Leaf("Tutto", () => _app.NewWidget(null)));
-        nuovo.Items.Add(Leaf("Solo CPU", () => _app.NewWidget("cpu")));
-        nuovo.Items.Add(Leaf("Solo GPU", () => _app.NewWidget("gpu")));
-        nuovo.Items.Add(Leaf("Solo RAM", () => _app.NewWidget("ram")));
-        nuovo.Items.Add(Leaf("Solo rete", () => _app.NewWidget("net")));
-        nuovo.Items.Add(Leaf("CPU + GPU", () => _app.NewWidget("cpugpu")));
-        nuovo.Items.Add(Leaf("Solo DeepSeek", () => _app.NewWidget("ds")));
+        nuovo.Items.Add(Leaf("TUTTO", () => _app.NewWidget(null)));
+        nuovo.Items.Add(Leaf("CPU", () => _app.NewWidget("cpu")));
+        nuovo.Items.Add(Leaf("GPU", () => _app.NewWidget("gpu")));
+        nuovo.Items.Add(Leaf("RAM", () => _app.NewWidget("ram")));
+        nuovo.Items.Add(Leaf("RETE", () => _app.NewWidget("net")));
+        nuovo.Items.Add(Leaf("CPU+GPU", () => _app.NewWidget("cpugpu")));
+        nuovo.Items.Add(Leaf("AI", () => _app.NewWidget("ai")));
+        nuovo.Items.Add(Leaf("DEEPSEEK", () => _app.NewWidget("ds")));
 
         var startup = new MenuItem { Header = "Avvia con Windows", IsCheckable = true, IsChecked = _app.StartupEnabled };
         startup.Click += (_, _) => _app.SetStartup(startup.IsChecked);

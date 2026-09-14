@@ -22,6 +22,10 @@ internal sealed class WidgetConfig
 
     public string Id { get; set; } = "main";
 
+    /// <summary>Nome del widget scelto alla creazione (GPU, CPU+GPU, TUTTO…). Vuoto = dedotto
+    /// dagli elementi visibili, così anche i widget vecchi hanno un nome leggibile.</summary>
+    public string Name { get; set; } = "";
+
     // position / size (physical pixels for the position, DIPs for the size)
     public bool HasPos { get; set; }
     public string? Monitor { get; set; }
@@ -119,6 +123,27 @@ internal sealed class WidgetConfig
 
     /// <summary>The order actually used, materialised (used by the reorder UI).</summary>
     public List<string> EffectiveOrder() => Elements.ToList();
+
+    /// <summary>Nome da mostrare nell'hub: quello scelto, altrimenti i suoi elementi.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string DisplayName
+    {
+        get
+        {
+            if (Name.Trim().Length > 0) return Name.Trim();
+            var visible = Elements.ToList();
+            if (visible.Count == 0) return "VUOTO";
+            if (ShowNet && ShowCpu && ShowGpu && ShowRam && ShowDisk) return "TUTTO";
+            var parts = new List<string>();
+            foreach (var (key, label) in new[]
+                     {
+                         ("cpu", "CPU"), ("gpu", "GPU"), ("ram", "RAM"), ("disk", "DISCO"),
+                         ("net", "RETE"), ("ai", "AI"), ("ds", "DEEPSEEK"),
+                     })
+                if (visible.Contains(key)) parts.Add(label);
+            return string.Join("+", parts);
+        }
+    }
 
     public void MoveElement(string key, int delta)
     {

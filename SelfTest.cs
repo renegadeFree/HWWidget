@@ -138,6 +138,9 @@ static class SelfTest
             // posizione e dimensioni: giro completo su finestre vere (salva → riapri → stesso rettangolo)
             WindowGeometryTest();
 
+            // adattamento del contenuto alla finestra (nessun taglio in basso)
+            ContentFitTest();
+
             // per-meter colours and the global scale
             var colored = new WidgetConfig
             {
@@ -395,6 +398,85 @@ static class SelfTest
                 System.IO.Path.Combine(System.IO.Path.GetTempPath(), "hwwidget-dstest.txt"), Log.ToString());
         }
         catch { }
+    }
+
+    /// <summary>Il contenuto entra sempre nella finestra: se è piccola viene rimpicciolito
+    /// (prima veniva tagliato in basso), se è grande lo spazio libero lo prendono i grafici.</summary>
+    static void ContentFitTest()
+    {
+        const string id = "selftest-fit";
+        try
+        {
+            new WidgetConfig { Id = id }.Delete();
+            var win = new MainWindow(WidgetConfig.Load(id));
+            win.Show();
+            Pump();
+            foreach (var (layout, w, h) in new[]
+                     {
+                         ("panelgraph", 328d, 1004d), ("panelgraph", 328d, 360d), ("panelgraph", 500d, 700d),
+                         ("rows", 360d, 700d), ("rows", 360d, 240d),
+                         ("tiles", 320d, 640d), ("tiles", 300d, 260d),
+                         ("cards", 340d, 600d), ("cards", 340d, 300d),
+                     })
+            {
+                win.Config.Layout = layout;
+                win.Width = w;
+                win.Height = h;
+                Pump();
+                System.Threading.Thread.Sleep(60);   // la finestra ha la nuova misura reale
+                Pump();
+                win.Rebuild();
+                double inner = win.InnerHeight();
+                double innerW = Math.Max(60, win.Host.ActualWidth > 10 ? win.Host.ActualWidth : win.Width - 26);
+                var root = (System.Windows.FrameworkElement)win.Host.Content;
+                root.Measure(new System.Windows.Size(innerW, double.PositiveInfinity));
+                double content = root.DesiredSize.Height;
+                Say("fit", $"{layout} {w:0}×{h:0} → contenuto {content:0} / {inner:0} disponibili " +
+                           $"(scala {win.ProbeFit:0.000}, naturale {win.ProbeNatural:0}, spazio {win.ProbeAvail:0})");
+                Check(content <= Math.Max(inner, win.ProbeAvail) + 2,
+                      $"{layout} {w:0}×{h:0}: contenuto {content:0} più alto della finestra {inner:0} " +
+                      $"(spazio usato {win.ProbeAvail:0}, scala {win.ProbeFit:0.000})");
+            }
+            win.Close();
+            Pump();
+            new WidgetConfig { Id = id }.Delete();
+
+            // costo del riadattamento: gira a ogni ridimensionamento e a ogni modifica dall'hub
+            var probe = new MainWindow(WidgetConfig.Load("main"));
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < 20; i++) probe.Rebuild();
+            double ms = sw.Elapsed.TotalMilliseconds / 20;
+            probe.Close();
+            Pump();
+            Say("fit-costo", $"{ms:0.0} ms per riadattare il contenuto");
+            Check(ms < 40, $"riadattamento troppo lento: {ms:0.0} ms");
+
+            // controllo a occhio: stesso pannello in una finestra alta e in una bassa
+            string temp = System.IO.Path.GetTempPath();
+            SavePng(DemoPanel("panelgraph", 304, 1, 26), 304, System.IO.Path.Combine(temp, "hwwidget-fit-tall.png"));
+            SavePng(DemoPanel("panelgraph", 304, 0.55, 0), 304, System.IO.Path.Combine(temp, "hwwidget-fit-small.png"));
+            Say("fit-render", $"pannello adattato in {temp}hwwidget-fit-tall.png e -fit-small.png");
+        }
+        catch (Exception ex) { Say("fit", "FALLITO: " + ex.Message); Environment.ExitCode = 1; }
+    }
+
+    /// <summary>Pannello con dati finti: serve solo per i rendering di controllo.</summary>
+    static WidgetView DemoPanel(string layout, double width, double fit, double extra)
+    {
+        var view = new WidgetView(new WidgetConfig { Layout = layout }, Palette.For("dark"),
+                                  new Dictionary<string, Series>(), width, fit, extra);
+        var rnd = new Random(7);
+        for (int i = 0; i < 90; i++)
+            view.Bind(new Metrics
+            {
+                GpuOk = true, GpuUtil = 20 + rnd.Next(50), TempC = 45 + rnd.Next(15),
+                VramUsed = 3 + rnd.Next(6), VramTotal = 12, Watts = 180, WattsLimit = 370,
+                CpuUsage = 10 + rnd.Next(40), CpuMhz = 4401, CpuBaseMhz = 4401,
+                RamPct = 30 + rnd.Next(20), RamUsed = 24, RamTotal = 64, RamSpeed = "6000 MT/s",
+                DiskRead = 1e6 * rnd.Next(20), DiskWrite = 2e6 * rnd.Next(20),
+                NetDown = 1e6 * rnd.Next(60), NetUp = 1e5 * rnd.Next(50), NetLink = 1e9, NetName = "Ethernet",
+            });
+        return view;
     }
 
     /// <summary>Costruisce due widget veri: il primo viene spostato e ridimensionato e poi

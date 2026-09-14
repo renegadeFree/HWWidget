@@ -27,6 +27,9 @@ public partial class MainWindow : Window
     readonly Dictionary<string, Series> _series = new();
     ResourceDictionary _menuStyles;
     WidgetView _view = null!;
+    double _naturalHeight;
+    double _fit = 1;
+    double _avail;
     IntPtr _hwnd;
     HwndSource? _src;
     DateTime _lastUi = DateTime.MinValue;
@@ -55,13 +58,13 @@ public partial class MainWindow : Window
         _saveDebounce.Interval = TimeSpan.FromMilliseconds(700);
         _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); SavePosition(); };
 
-        // panel layouts are sized from the widget width, so re-lay them out after a resize
-        // (the graph history lives outside the visual tree and survives the rebuild)
+        // the content follows the window (fit and graph heights), so re-lay it out after a
+        // resize (the graph history lives outside the visual tree and survives the rebuild)
         _resizeDebounce.Interval = TimeSpan.FromMilliseconds(180);
         _resizeDebounce.Tick += (_, _) =>
         {
             _resizeDebounce.Stop();
-            if (_c.Layout is "panel" or "panelgraph") Rebuild();
+            Rebuild();
         };
 
         LocationChanged += (_, _) => DebouncedSave();
@@ -94,12 +97,80 @@ public partial class MainWindow : Window
 
     // ---------- content ----------
 
-    void Rebuild()
+    /// <summary>Il contenuto si adatta alla finestra: se non ci sta viene rimpicciolito
+    /// (niente più tagli in basso), lo spazio libero lo prendono i grafici. La finestra
+    /// non cambia mai misura da sola: resta dove e come la lascia l'utente.</summary>
+    internal void Rebuild()
     {
-        _view = new WidgetView(_c, _p, _series, ActualWidth > 10 ? ActualWidth : _c.Width);
+        double innerW = Math.Max(60, Host.ActualWidth > 10 ? Host.ActualWidth : _c.Width - 26);
+        _view = new WidgetView(_c, _p, _series, innerW);
+        double avail = InnerHeight() - 4;   // margine per gli arrotondamenti di layout/DPI
+        _naturalHeight = Measured(_view, innerW);
+        _avail = avail;
+
+        if (_naturalHeight > avail + 0.5)
+        {
+            // non ci sta: si rimpicciolisce tutto finché entra (mai tagliato in basso).
+            // La scala non è esattamente proporzionale (spazi e righe seguono la scala
+            // righe), quindi il fattore si corregge sul contenuto davvero misurato.
+            double fit = Math.Clamp(avail / _naturalHeight, 0.2, 1);
+            WidgetView? fits = null;
+            double fitsFit = 0.2;
+            for (int pass = 0; pass < 4; pass++)
+            {
+                var v = new WidgetView(_c, _p, _series, innerW, fit);
+                double h = Measured(v, innerW);
+                if (h <= avail + 0.5)
+                {
+                    fits = v;
+                    fitsFit = fit;
+                    if (avail - h <= 1) break;                  // ci sta quasi esatto
+                    fit = Math.Min(1, fit * avail / h);         // avanza spazio: prova più grande
+                }
+                else fit = Math.Max(0.2, fit * avail / h);      // troppo grande: rimpicciolisce
+            }
+            _view = fits ?? new WidgetView(_c, _p, _series, innerW, fitsFit);
+            _fit = fitsFit;
+        }
+        else
+        {
+            // avanza spazio: lo prendono i grafici (il resto resta della misura scelta)
+            _fit = 1;
+            double free = avail - _naturalHeight;
+            if (_view.GraphCount > 0 && free > 0.5)
+            {
+                // I grafici non rendono tutto lo spazio dato (righe e tessere hanno un
+                // minimo): la resa reale è una retta, quindi si ricava da due misure.
+                double p1 = free / _view.GraphCount;
+                double g1 = Measured(new WidgetView(_c, _p, _series, innerW, 1, p1), innerW) - _naturalHeight;
+                double g2 = Measured(new WidgetView(_c, _p, _series, innerW, 1, p1 * 2), innerW) - _naturalHeight;
+                double k = (g2 - g1) / p1;
+                double per = k > 0.05 ? Math.Max(0, (free - g1 + k * p1) / k) : 0;
+                if (per > 0) _view = new WidgetView(_c, _p, _series, innerW, 1, per);
+            }
+        }
+
         Host.Content = _view.Root;
         _view.Bind(SensorHub.Current);
-        _view.Root.Measure(new Size(Math.Max(60, (Host.ActualWidth > 10 ? Host.ActualWidth : _c.Width - 26)), double.PositiveInfinity));
+    }
+
+    static double Measured(WidgetView v, double width)
+    {
+        v.Root.Measure(new Size(width, double.PositiveInfinity));
+        return v.Root.DesiredSize.Height;
+    }
+
+    // per il selftest: che misura ha usato l'ultimo adattamento
+    internal double ProbeNatural => _naturalHeight;
+    internal double ProbeFit => _fit;
+    internal double ProbeAvail => _avail;
+
+    /// <summary>Spazio utile dentro la finestra (tolta la cornice del pannello).</summary>
+    internal double InnerHeight()
+    {
+        double h = ActualHeight > 10 ? ActualHeight : _c.Height;
+        return Math.Max(40, h - Root.Padding.Top - Root.Padding.Bottom
+                                   - Root.BorderThickness.Top - Root.BorderThickness.Bottom);
     }
 
     void OnTick(Metrics m)
@@ -182,17 +253,13 @@ public partial class MainWindow : Window
         int y = (int)Math.Clamp(wa2.Y + _c.OffY, wa2.Y, Math.Max(wa2.Y, wa2.Y + wa2.Height - ph));
         Native.SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0,
             Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
-        GrowIfContentClipped();
     }
 
-    /// <summary>All'avvio, se il contenuto non entra nell'altezza salvata (capita dopo un
-    /// aggiornamento che cambia spaziature o righe) il widget cresce quanto serve: un
-    /// monitor tagliato non serve a nessuno. Ridimensionamenti manuali non vengono toccati.</summary>
+    /// <summary>Solo per un widget appena creato: gli si dà subito la misura del contenuto.
+    /// Dopo, la finestra non viene più toccata (il contenuto si adatta da solo).</summary>
     void GrowIfContentClipped()
     {
-        double needed = FitHeight();
-        if (needed <= Height + 2) return;
-        Height = needed;
+        Height = Math.Max(MinHeight, FitHeight());
         SavePosition();
     }
 
@@ -233,11 +300,9 @@ public partial class MainWindow : Window
 
     double FitHeight()
     {
-        // measure the real content instead of estimating it: exact for every layout
-        UpdateLayout();
-        double inner = Math.Max(60, (Host.ActualWidth > 10 ? Host.ActualWidth : _c.Width - 26));
-        _view.Root.Measure(new Size(inner, double.PositiveInfinity));
-        double h = _view.Root.DesiredSize.Height + Root.Padding.Top + Root.Padding.Bottom + 6;
+        // altezza reale del contenuto a misura naturale (quella già adattata è la finestra)
+        double h = _naturalHeight + Root.Padding.Top + Root.Padding.Bottom
+                   + Root.BorderThickness.Top + Root.BorderThickness.Bottom + 6;
         // never ask for more than the monitor's working area
         var scr = _hwnd != IntPtr.Zero ? WF.Screen.FromHandle(_hwnd) : WF.Screen.PrimaryScreen!;
         return Math.Min(h, scr.WorkingArea.Height - 40);
@@ -596,24 +661,18 @@ public partial class MainWindow : Window
     {
         _c.UiScale = Math.Clamp(value, 0.5, 2.5);
         Changed(true);
-        Height = FitHeight();
-        SavePosition();
     }
 
     void Preset(bool net, bool cpu, bool gpu, bool ram, bool disk)
     {
         _c.ShowNet = net; _c.ShowCpu = cpu; _c.ShowGpu = gpu; _c.ShowRam = ram; _c.ShowDisk = disk;
         Changed(true);
-        Height = FitHeight();
-        SavePosition();
     }
 
     void SetLayout(string layout)
     {
         _c.Layout = layout;
         Changed(true);
-        Height = FitHeight();
-        SavePosition();
     }
 
     void SetGraph(Action<WidgetConfig> mutate)
@@ -651,22 +710,17 @@ public partial class MainWindow : Window
     {
         _c.TextScale = reset ? 1 : Math.Clamp(_c.TextScale + delta, 0.6, 2.2);
         Changed(true);
-        Height = FitHeight();
-        SavePosition();
     }
 
     void SetRows(double delta, bool reset = false)
     {
         _c.RowScale = reset ? 1 : Math.Clamp(_c.RowScale + delta, 0.6, 3);
         Changed(true);
-        Height = FitHeight();
-        SavePosition();
     }
 
     void SetSize(double width)
     {
         Width = width;
-        Height = FitHeight();
         SavePosition();
     }
 
@@ -683,8 +737,10 @@ public partial class MainWindow : Window
 
     internal WidgetConfig Config => _c;
 
-    /// <summary>Re-applies everything from the config (used by the control hub for live edits).</summary>
-    public void ApplyConfig(bool resize = false)
+    /// <summary>Re-applies everything from the config (used by the control hub for live
+    /// edits). La finestra non viene mai ridimensionata: la misura è dell'utente, il
+    /// contenuto si adatta.</summary>
+    public void ApplyConfig()
     {
         _p = Palette.For(_c.Theme);
         _menuStyles = MenuStyles.Create(_p);
@@ -693,7 +749,6 @@ public partial class MainWindow : Window
         Rebuild();
         ApplyBackdrop();
         SensorHub.SetInterval(_c.Id, _c.IntervalSeconds);
-        if (resize) Height = FitHeight();
         _c.Save();
     }
 
