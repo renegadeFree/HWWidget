@@ -207,7 +207,8 @@ public sealed class Sparkline : FrameworkElement
             if (double.IsNaN(v)) v = 0;
             double bh = Math.Max(1, Math.Min(1, v / vmax) * (h - 2));
             double x = i * slot + (slot - barW) / 2;
-            dc.DrawRectangle(brush, null, new Rect(x, h - bh, barW, bh));
+            double radius = Math.Min(Math.Min(barW, bh) / 2, 4.0);
+            dc.DrawRoundedRectangle(brush, null, new Rect(x, h - bh, barW, bh), radius, radius);
         }
     }
 }
