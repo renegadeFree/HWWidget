@@ -128,6 +128,9 @@ static class SelfTest
                 Check(wanted > 60, $"layout {layout}: contenuto troppo basso ({wanted:0})");
                 Say("layout", $"{layout}: {elements} elementi, {rows} righe, {view.BoundCount} bind, contenuto {wanted:0} DIP a 300 di larghezza");
             }
+            Check(WidgetView.Mem(24, 64).Contains("GB") && !WidgetView.Mem(24, 64).Contains('%'),
+                  "RAM/VRAM mostrate ancora in percentuale");
+            Say("memoria", $"formato RAM/VRAM: {WidgetView.Mem(24, 64)}");
 
             var light = Palette.For("light");
             var dark = Palette.For("dark");

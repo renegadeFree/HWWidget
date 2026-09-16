@@ -182,6 +182,9 @@ internal sealed class WidgetView
         : bps >= 1024 ? $"{bps / 1024:0} KB/s"
         : $"{bps:0} B/s";
 
+    /// <summary>Memoria usata/totale in GB: RAM e VRAM non si mostrano più in percentuale.</summary>
+    internal static string Mem(double used, double total) => $"{used:0.0}/{total:0.0} GB";
+
     static string ElName(string el) => el switch
     {
         "net" => "NET",
@@ -237,19 +240,19 @@ internal sealed class WidgetView
                 }
                 double vramPct = m.VramTotal > 0 ? m.VramUsed * 100 / m.VramTotal : 0;
                 lines.Add(($"{m.GpuUtil:0}%", m.GpuUtil, "use", new SolidColorBrush(_p.Gpu), "pct"));
-                lines.Add(($"{m.VramUsed:0.0}/{m.VramTotal:0.0} GB", vramPct, "vram", new SolidColorBrush(_p.GpuAlt), "pct"));
+                lines.Add((Mem(m.VramUsed, m.VramTotal), vramPct, "vram", new SolidColorBrush(_p.GpuAlt), "pct"));
                 if (_c.ShowSecondary)
                     lines.Add(($"{m.Watts:0} W", m.WattsLimit > 0 ? m.Watts * 100 / m.WattsLimit : 0, "watt", new SolidColorBrush(_p.Watt), "pct"));
-                string sub = $"{m.VramUsed:0.0}/{m.VramTotal:0.0} GB" + (_c.ShowSecondary ? $" · {m.Watts:0} W" : "");
+                string sub = Mem(m.VramUsed, m.VramTotal) + (_c.ShowSecondary ? $" · {m.Watts:0} W" : "");
                 return ($"{m.GpuUtil:0}%", sub, m.GpuUtil / 100.0, lines);
             }
             default:
             {
-                lines.Add(($"{m.RamPct:0}%", m.RamPct, "use", new SolidColorBrush(_p.Ram), "pct"));
+                string mem = Mem(m.RamUsed, m.RamTotal);
+                lines.Add((mem, m.RamPct, "use", new SolidColorBrush(_p.Ram), "pct"));
                 if (_c.ShowSecondary)
-                    lines.Add(($"{m.RamUsed:0}/{m.RamTotal:0} GB", m.RamPct, "used", new SolidColorBrush(_p.NetDown), "pct"));
-                string sub = $"{m.RamUsed:0}/{m.RamTotal:0} GB" + (m.RamSpeed.Length > 0 ? $" · {m.RamSpeed}" : "");
-                return ($"{m.RamPct:0}%", sub, m.RamPct / 100.0, lines);
+                    lines.Add((m.RamSpeed, m.RamPct, "used", new SolidColorBrush(_p.NetDown), "pct"));
+                return (mem, m.RamSpeed, m.RamPct / 100.0, lines);
             }
             case "disk":
             {
@@ -323,7 +326,7 @@ internal sealed class WidgetView
                     "cpu" => d.sub.Length > 0 ? $"{d.main} · {d.sub}" : d.main,
                     "gpu" => d.sub.Length > 0 ? $"{d.main} · {d.sub}" : d.main,
                     "ai" => d.sub.Length > 0 ? $"{d.main} · {d.sub}" : d.main,
-                    _ => d.sub.Length > 0 ? $"{d.sub}" : d.main,
+                    _ => d.sub.Length > 0 ? $"{d.main} · {d.sub}" : d.main,
                 };
                 var primary = d.lines[0];
                 if (graph == null) return;
@@ -521,12 +524,12 @@ internal sealed class WidgetView
             case "gpu":
                 body.Children.Add(MetricRow($"{el}.use", el, "Uso", m => m.GpuOk ? $"{m.GpuUtil:0.0}%" : "n/d", m => m.GpuUtil, m => m.GpuUtil, graphs, false, false));
                 body.Children.Add(MetricRow($"{el}.temp", el, "Temp", m => m.GpuOk ? $"{m.TempC:0.0} °C" : "n/d", m => m.TempC, m => m.TempC, graphs, true, false));
-                body.Children.Add(MetricRow($"{el}.vram", el, "VRAM", m => m.VramTotal > 0 ? $"{m.VramUsed * 100 / m.VramTotal:0.0}%" : "n/d",
+                body.Children.Add(MetricRow($"{el}.vram", el, "VRAM", m => m.VramTotal > 0 ? Mem(m.VramUsed, m.VramTotal) : "n/d",
                     m => m.VramTotal > 0 ? m.VramUsed * 100 / m.VramTotal : 0,
                     m => m.VramTotal > 0 ? m.VramUsed * 100 / m.VramTotal : 0, graphs, false, true));
                 break;
             case "ram":
-                body.Children.Add(MetricRow($"{el}.use", el, "Uso", m => $"{m.RamPct:0.0}%", m => m.RamPct, m => m.RamPct, graphs, false, true));
+                body.Children.Add(MetricRow($"{el}.use", el, "Uso", m => Mem(m.RamUsed, m.RamTotal), m => m.RamPct, m => m.RamPct, graphs, false, true));
                 break;
             case "disk":
                 body.Children.Add(PairRow(el, graphs,
