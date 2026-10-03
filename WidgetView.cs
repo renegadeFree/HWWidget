@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using Brush = System.Windows.Media.Brush;
 using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
@@ -23,13 +24,16 @@ internal sealed class Metrics
     public string NetName = "";
     public double CpuUsage, CpuMhz, CpuBaseMhz;
     public string CpuName = "";
+    public List<double> CpuCores = new();
     public bool GpuOk;
     public double GpuUtil, VramUsed, VramTotal, Watts, WattsLimit, TempC, ClockMhz;
     public string GpuName = "";
+    public List<(string Name, double Pct)> GpuEngines = new();
     public double RamUsed, RamTotal, RamPct;
     public string RamSpeed = "";
     public bool DiskOk;
     public double DiskRead, DiskWrite;
+    public List<(string Name, double TotalGb, double FreeGb)> Disks = new();
     public AiSnapshot Ai = new();
 }
 
@@ -59,6 +63,8 @@ internal sealed class WidgetView
     readonly double _fit;
     int _graphs;
     readonly List<Action<Metrics>> _binds = new();
+    readonly List<Action<Metrics>> _detailBinds = new();
+    readonly double _du;
 
     public FrameworkElement Root { get; }
 
@@ -77,6 +83,7 @@ internal sealed class WidgetView
         _u = PanelUnit(c, widthDip) * fit;
         _extraGraph = extraGraph;
         _fit = fit;
+        _du = Math.Max(_u, 0.85);
         Root = c.Layout switch
         {
             "cards" => BuildCards(),
@@ -97,6 +104,7 @@ internal sealed class WidgetView
     public void Bind(Metrics m)
     {
         foreach (var b in _binds) b(m);
+        foreach (var b in _detailBinds) b(m);
     }
 
     public int BoundCount => _binds.Count;
@@ -172,6 +180,198 @@ internal sealed class WidgetView
         b.SizeChanged += (_, e) =>
             b.Clip = new RectangleGeometry(new Rect(0, 0, e.NewSize.Width, e.NewSize.Height), radius, radius);
         return b;
+    }
+
+    // ---------- dettagli a comparsa (icona accanto al titolo della sezione) ----------
+
+    /// <summary>Icona accanto al nome della sezione: apre un popup ancorato al pulsante.
+    /// StaysOpen=false chiude il popup al primo clic fuori; l'animazione è quella nativa
+    /// di WPF, così non serve gestire a mano mouse capture o storyboard.</summary>
+    FrameworkElement DetailButton(string el)
+    {
+        var glyph = Icon("\uE946", 10 * _du, new SolidColorBrush(_p.TextDim));
+        var box = new Border
+        {
+            CornerRadius = new CornerRadius(5 * _du),
+            Padding = new Thickness(4 * _du, 1.5 * _du, 4 * _du, 1.5 * _du),
+            Background = Brushes.Transparent,
+            Child = glyph,
+            Cursor = Cursors.Hand,
+            VerticalAlignment = VerticalAlignment.Center,
+            ToolTip = "Dettagli",
+        };
+        box.MouseEnter += (_, _) =>
+        {
+            box.Background = new SolidColorBrush(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF));
+            glyph.Foreground = new SolidColorBrush(_p.Text);
+        };
+        box.MouseLeave += (_, _) =>
+        {
+            box.Background = Brushes.Transparent;
+            glyph.Foreground = new SolidColorBrush(_p.TextDim);
+        };
+        // il clic non deve finire nel trascinamento della finestra
+        box.MouseLeftButtonDown += (_, e) => e.Handled = true;
+
+        var body = new StackPanel();
+        var scroll = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            MaxHeight = 320 * _du,
+            Content = body,
+        };
+        var inner = new Border
+        {
+            CornerRadius = new CornerRadius(9 * _du),
+            Background = new SolidColorBrush(_p.Card),
+            Padding = new Thickness(10 * _du, 8 * _du, 10 * _du, 9 * _du),
+            Child = scroll,
+        };
+        var card = new Border
+        {
+            MinWidth = 170 * _du,
+            MaxWidth = 270 * _du,
+            CornerRadius = new CornerRadius(10 * _du),
+            // il popup è una finestra separata: la card da sola è troppo trasparente,
+            // quindi usa lo stesso fondo opaco del pannello con sopra la card del widget
+            Background = new SolidColorBrush(_p.Panel),
+            BorderBrush = new SolidColorBrush(_p.PanelBorder),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(1),
+            Effect = new DropShadowEffect
+            {
+                Color = Colors.Black,
+                BlurRadius = 18,
+                ShadowDepth = 4,
+                Opacity = 0.45,
+            },
+            Child = inner,
+        };
+        var popup = new Popup
+        {
+            PlacementTarget = box,
+            Placement = PlacementMode.Bottom,
+            AllowsTransparency = true,
+            StaysOpen = false,
+            PopupAnimation = PopupAnimation.Slide,
+            VerticalOffset = 6 * _du,
+            HorizontalOffset = 0,
+            Child = card,
+        };
+        box.Unloaded += (_, _) => popup.IsOpen = false;
+        box.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            glyph.Foreground = new SolidColorBrush(_p.Text);
+            popup.IsOpen = !popup.IsOpen;
+        };
+        _detailBinds.Add(m =>
+        {
+            if (!popup.IsOpen) return;
+            double offset = scroll.VerticalOffset;
+            FillDetails(body, el, m);
+            scroll.ScrollToVerticalOffset(offset);
+        });
+        return box;
+    }
+
+    void FillDetails(StackPanel body, string el, Metrics m)
+    {
+        body.Children.Clear();
+        var title = Txt($"{ElName(el)} · dettagli", 9 * _du, new SolidColorBrush(_p.TextDim), bold: true);
+        title.Margin = new Thickness(0, 0, 0, 7 * _du);
+        body.Children.Add(title);
+        switch (el)
+        {
+            case "cpu":
+                body.Children.Add(DetailRow("Totale", $"{m.CpuUsage:0}%", m.CpuUsage, new SolidColorBrush(_p.Cpu)));
+                if (m.CpuCores.Count == 0)
+                {
+                    body.Children.Add(DetailRow("Core", "n/d"));
+                    break;
+                }
+                for (int i = 0; i < m.CpuCores.Count; i++)
+                    body.Children.Add(DetailRow($"Core {i}", $"{m.CpuCores[i]:0}%",
+                                                m.CpuCores[i], new SolidColorBrush(_p.Cpu)));
+                break;
+            case "gpu":
+                body.Children.Add(DetailRow("Uso", $"{m.GpuUtil:0}%", m.GpuUtil, new SolidColorBrush(_p.Gpu)));
+                if (!m.GpuOk)
+                {
+                    body.Children.Add(DetailRow("GPU", "n/d"));
+                    break;
+                }
+                if (m.GpuEngines.Count == 0)
+                {
+                    body.Children.Add(DetailRow("Engine", "in attesa…"));
+                    break;
+                }
+                foreach (var e in m.GpuEngines)
+                    body.Children.Add(DetailRow(e.Name, $"{e.Pct:0}%", e.Pct, new SolidColorBrush(_p.Gpu)));
+                break;
+            case "ram":
+                body.Children.Add(DetailRow("Frequenza", m.RamSpeed.Length > 0 ? m.RamSpeed : "n/d"));
+                body.Children.Add(DetailRow("Memoria", Mem(m.RamUsed, m.RamTotal)));
+                break;
+            case "disk":
+                if (m.Disks.Count == 0)
+                {
+                    body.Children.Add(DetailRow("Dischi", "n/d"));
+                    break;
+                }
+                foreach (var d in m.Disks)
+                    body.Children.Add(DetailRow($"{d.Name} · {d.TotalGb:0.0} GB", $"{d.FreeGb:0.0} GB liberi"));
+                break;
+            default:
+                body.Children.Add(DetailRow("Adattatore", m.NetName.Length > 0 ? m.NetName : "n/d"));
+                if (m.NetLink > 0)
+                    body.Children.Add(DetailRow("Link", $"{m.NetLink / 1e9:0.0} Gbps"));
+                break;
+        }
+    }
+
+    FrameworkElement DetailRow(string label, string value, double pct = -1, Brush? color = null)
+    {
+        var tone = color ?? new SolidColorBrush(_p.Text);
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var lab = Txt(label, 9 * _du, new SolidColorBrush(_p.TextDim));
+        lab.VerticalAlignment = VerticalAlignment.Center;
+        var val = Txt(value, 9 * _du, tone, bold: true, mono: true, align: TextAlignment.Right);
+        val.VerticalAlignment = VerticalAlignment.Center;
+        val.Margin = new Thickness(10 * _du, 0, 0, 0);
+        Grid.SetColumn(val, 1);
+        grid.Children.Add(lab);
+        grid.Children.Add(val);
+
+        var row = new StackPanel { Margin = new Thickness(0, 0, 0, pct >= 0 ? 5 * _du : 6 * _du) };
+        row.Children.Add(grid);
+        if (pct >= 0)
+        {
+            var track = new Border
+            {
+                Height = 3 * _du,
+                CornerRadius = new CornerRadius(1.5 * _du),
+                Background = new SolidColorBrush(_p.Track),
+                Margin = new Thickness(0, 3 * _du, 0, 0),
+            };
+            var fill = new Border
+            {
+                Height = 3 * _du,
+                CornerRadius = new CornerRadius(1.5 * _du),
+                Background = tone,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Width = 0,
+            };
+            var bar = new Grid();
+            bar.Children.Add(track);
+            bar.Children.Add(fill);
+            bar.SizeChanged += (_, e) => fill.Width = Math.Max(0, Math.Clamp(pct, 0, 100) / 100.0) * e.NewSize.Width;
+            row.Children.Add(bar);
+        }
+        return row;
     }
 
     static ColumnDefinition Star(double weight)
@@ -497,6 +697,12 @@ internal sealed class WidgetView
             Margin = new Thickness(0, 0, 5 * _u, 0),
         });
         headerContent.Children.Add(Txt(ElName(el), 11.5 * _u, new SolidColorBrush(_p.Text), bold: true));
+        if (el is "cpu" or "gpu" or "ram" or "disk" or "net")
+        {
+            var details = DetailButton(el);
+            details.Margin = new Thickness(4 * _u, 0, 0, 0);
+            headerContent.Children.Add(details);
+        }
         headerContent.VerticalAlignment = VerticalAlignment.Center;
 
         // intestazione: nome sezione a sinistra, pulsante di aggiornamento a destra (DeepSeek)

@@ -172,10 +172,50 @@ static class Native
     public static extern uint PdhGetFormattedCounterValue(IntPtr counter, uint format, out uint type,
                                                           out PDH_FMT_COUNTERVALUE value);
 
+    /// <summary>Una voce di PdhGetFormattedCounterArray: nome istanza + valore.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PDH_FMT_COUNTERVALUE_ITEM
+    {
+        public IntPtr szName;
+        public PDH_FMT_COUNTERVALUE FmtValue;
+    }
+
+    [DllImport("pdh.dll", CharSet = CharSet.Unicode)]
+    public static extern uint PdhGetFormattedCounterArray(IntPtr counter, uint format, ref uint size,
+                                                          ref uint count, IntPtr buffer);
+
     [DllImport("pdh.dll")]
     public static extern uint PdhCloseQuery(IntPtr query);
 
     public const uint PDH_FMT_DOUBLE = 0x00000200;
+    public const uint PDH_MORE_DATA = 0x800007D2;
+
+    /// <summary>Legge un contatore wildcard (una voce per istanza), senza allocare pin.</summary>
+    public static List<(string name, double value)> CounterArray(IntPtr counter)
+    {
+        var list = new List<(string, double)>();
+        uint size = 0, count = 0;
+        if (PdhGetFormattedCounterArray(counter, PDH_FMT_DOUBLE, ref size, ref count, IntPtr.Zero) != PDH_MORE_DATA
+            || size == 0)
+            return list;
+
+        IntPtr buffer = Marshal.AllocHGlobal((int)size);
+        try
+        {
+            if (PdhGetFormattedCounterArray(counter, PDH_FMT_DOUBLE, ref size, ref count, buffer) != 0)
+                return list;
+            int itemSize = Marshal.SizeOf<PDH_FMT_COUNTERVALUE_ITEM>();
+            for (uint i = 0; i < count; i++)
+            {
+                var item = Marshal.PtrToStructure<PDH_FMT_COUNTERVALUE_ITEM>(buffer + (int)i * itemSize);
+                if (item.FmtValue.CStatus != 0) continue;
+                string name = Marshal.PtrToStringUni(item.szName) ?? "";
+                list.Add((name, item.FmtValue.doubleValue));
+            }
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+        return list;
+    }
 
     public const int GWL_STYLE = -16;
     public const int WS_THICKFRAME = 0x40000;
@@ -392,6 +432,59 @@ internal sealed class CpuSampler
     }
 }
 
+/// <summary>Carico per core da PDH, contatore inglese: niente WMI, una syscall per campione.</summary>
+internal sealed class CpuCoreSampler
+{
+    IntPtr _query, _counter;
+    bool _opened;
+
+    public List<double> Cores { get; } = new();
+
+    public void Open()
+    {
+        if (_opened) return;
+        _opened = true;
+        try
+        {
+            if (Native.PdhOpenQuery(null, IntPtr.Zero, out _query) != 0) return;
+            uint r = Native.PdhAddEnglishCounter(_query, @"\Processor Information(*)\% Processor Time",
+                                                 IntPtr.Zero, out _counter);
+            if (r != 0)
+                r = Native.PdhAddEnglishCounter(_query, @"\Processor(*)\% Processor Time",
+                                                IntPtr.Zero, out _counter);
+            if (r != 0) return;
+            Native.PdhCollectQueryData(_query);
+        }
+        catch { }
+    }
+
+    public void Sample()
+    {
+        if (!_opened || _counter == IntPtr.Zero) return;
+        try
+        {
+            if (Native.PdhCollectQueryData(_query) != 0) return;
+            var rows = Native.CounterArray(_counter)
+                .Where(x => !x.name.StartsWith("_Total", StringComparison.OrdinalIgnoreCase))
+                .Select(x => (index: CoreIndex(x.name), value: Math.Clamp(x.value, 0, 100)))
+                .Where(x => x.index >= 0)
+                .OrderBy(x => x.index)
+                .ToList();
+            if (rows.Count == 0) return;
+            Cores.Clear();
+            Cores.AddRange(rows.Select(x => x.value));
+        }
+        catch { }
+    }
+
+    static int CoreIndex(string instance)
+    {
+        int comma = instance.LastIndexOf(',');
+        string tail = comma >= 0 ? instance[(comma + 1)..] : instance;
+        return int.TryParse(tail, out int i) ? i : -1;
+    }
+}
+
 /// <summary>Disk throughput from PDH with english counter paths (no admin, no WMI):
 /// PDH computes the bytes/sec rate itself.</summary>
 internal sealed class DiskSampler
@@ -403,6 +496,7 @@ internal sealed class DiskSampler
     public double ReadBps { get; private set; }
     public double WriteBps { get; private set; }
     public string Name { get; private set; } = "_Total";
+    public List<(string Name, double TotalGb, double FreeGb)> Volumes { get; } = new();
 
     public void Open()
     {
@@ -428,6 +522,29 @@ internal sealed class DiskSampler
             if (Native.PdhCollectQueryData(_query) != 0) return;
             ReadBps = Read(_read);
             WriteBps = Read(_write);
+        }
+        catch { }
+    }
+
+    /// <summary>Capacità dei volumi locali (C:, D:, …), non dei singoli dischi fisici.</summary>
+    public void LoadStatic()
+    {
+        try
+        {
+            var rows = new List<(string Name, double TotalGb, double FreeGb)>();
+            using var searcher = new ManagementObjectSearcher(
+                "SELECT DeviceID, Size, FreeSpace FROM Win32_LogicalDisk WHERE DriveType=3");
+            foreach (ManagementObject mo in searcher.Get())
+            {
+                string name = (mo["DeviceID"] as string) ?? "";
+                if (name.Length == 0) continue;
+                double total = Convert.ToUInt64(mo["Size"] ?? 0UL) / 1073741824.0;
+                double free = Convert.ToUInt64(mo["FreeSpace"] ?? 0UL) / 1073741824.0;
+                if (total > 0) rows.Add((name, total, free));
+            }
+            rows.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+            Volumes.Clear();
+            Volumes.AddRange(rows);
         }
         catch { }
     }
@@ -552,15 +669,140 @@ internal sealed class GpuSampler : IDisposable
     public void Dispose() { if (_booted) { try { Shutdown(); } catch { } _booted = false; } }
 }
 
+/// <summary>Utilizzo per engine GPU dai contatori Windows (gli stessi dati di Task Manager):
+/// \GPU Engine(*)\Utilization Percentage, aggregato per tipo e indice engine.</summary>
+internal sealed class GpuEngineSampler
+{
+    IntPtr _query, _counter;
+    bool _opened;
+
+    public List<(string Name, double Pct)> Engines { get; } = new();
+
+    public void Open()
+    {
+        if (_opened) return;
+        _opened = true;
+        try
+        {
+            if (Native.PdhOpenQuery(null, IntPtr.Zero, out _query) != 0) return;
+            if (Native.PdhAddEnglishCounter(_query, @"\GPU Engine(*)\Utilization Percentage",
+                                            IntPtr.Zero, out _counter) != 0) return;
+            Native.PdhCollectQueryData(_query);
+        }
+        catch { }
+    }
+
+    public void Sample()
+    {
+        if (!_opened || _counter == IntPtr.Zero) return;
+        try
+        {
+            // ponytail: enumerazione completa degli engine una volta al secondo; se il costo
+            // diventa misurabile, passare a handle incrementali invece di rileggere il wildcard.
+            if (Native.PdhCollectQueryData(_query) != 0) return;
+            var sums = new Dictionary<(string type, int index), double>();
+            foreach (var row in Native.CounterArray(_counter))
+            {
+                var (type, index) = ParseEngine(row.name);
+                if (type.Length == 0) continue;
+                var key = (type, index);
+                sums[key] = sums.TryGetValue(key, out double v) ? v + row.value : row.value;
+            }
+
+            Engines.Clear();
+            Engines.AddRange(sums
+                .Select(kv => (
+                    Name: kv.Key.index >= 0
+                        ? $"{Friendly(kv.Key.type)} {kv.Key.index}"
+                        : Friendly(kv.Key.type),
+                    Pct: Math.Clamp(kv.Value, 0, 100)))
+                .OrderBy(e => EngineOrder(e.Name))
+                .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase));
+        }
+        catch { }
+    }
+
+    static (string type, int index) ParseEngine(string instance)
+    {
+        string type = "";
+        int index = -1;
+        int t = instance.IndexOf("engtype_", StringComparison.OrdinalIgnoreCase);
+        if (t >= 0)
+        {
+            string rest = instance[(t + 8)..].Trim();
+            int end = rest.LastIndexOf(' ');
+            if (end > 0 && int.TryParse(rest[(end + 1)..], out int typeIndex))
+            {
+                type = rest[..end];
+                index = typeIndex;
+            }
+            else
+            {
+                end = rest.LastIndexOf('_');
+                if (end > 0 && int.TryParse(rest[(end + 1)..], out typeIndex))
+                {
+                    type = rest[..end];
+                    index = typeIndex;
+                }
+                else type = rest;
+            }
+            type = new string(type.Where(char.IsLetterOrDigit).ToArray());
+        }
+        return (type.ToLowerInvariant(), index);
+    }
+
+    static string Friendly(string type) => type.ToLowerInvariant() switch
+    {
+        "3d" => "3D",
+        "compute" => "Compute",
+        "copy" => "Copy",
+        "videodecode" => "Video Decode",
+        "videoencode" => "Video Encode",
+        "videoprocessing" => "Video Processing",
+        "videojpeg" => "Video JPEG",
+        "videocodec" => "Video Codec",
+        "security" => "Security",
+        "timer" => "Timer",
+        "highprioritycompute" => "High Priority Compute",
+        "highpriority3d" => "High Priority 3D",
+        "legacyoverlay" => "Legacy Overlay",
+        "ofa" => "OFA",
+        "vr" => "VR",
+        _ => type,
+    };
+
+    static int EngineOrder(string name) => name switch
+    {
+        var n when n.StartsWith("3D", StringComparison.OrdinalIgnoreCase) => 0,
+        var n when n.StartsWith("Compute", StringComparison.OrdinalIgnoreCase) => 1,
+        var n when n.StartsWith("Copy", StringComparison.OrdinalIgnoreCase) => 2,
+        var n when n.StartsWith("High Priority Compute", StringComparison.OrdinalIgnoreCase) => 3,
+        var n when n.StartsWith("High Priority 3D", StringComparison.OrdinalIgnoreCase) => 4,
+        var n when n.StartsWith("Video Decode", StringComparison.OrdinalIgnoreCase) => 5,
+        var n when n.StartsWith("Video Encode", StringComparison.OrdinalIgnoreCase) => 6,
+        var n when n.StartsWith("Video Processing", StringComparison.OrdinalIgnoreCase) => 7,
+        var n when n.StartsWith("Video JPEG", StringComparison.OrdinalIgnoreCase) => 8,
+        var n when n.StartsWith("Video Codec", StringComparison.OrdinalIgnoreCase) => 9,
+        var n when n.StartsWith("Security", StringComparison.OrdinalIgnoreCase) => 10,
+        var n when n.StartsWith("Timer", StringComparison.OrdinalIgnoreCase) => 11,
+        var n when n.StartsWith("OFA", StringComparison.OrdinalIgnoreCase) => 12,
+        var n when n.StartsWith("VR", StringComparison.OrdinalIgnoreCase) => 13,
+        var n when n.StartsWith("Legacy Overlay", StringComparison.OrdinalIgnoreCase) => 14,
+        _ => 20,
+    };
+}
+
 /// <summary>Single sampler for the whole app: N widgets share one set of reads, so
 /// adding widgets doesn't multiply the cost.</summary>
 internal static class SensorHub
 {
     static readonly NetSampler Net = new();
     static readonly CpuSampler Cpu = new();
+    static readonly CpuCoreSampler CpuCores = new();
     static readonly RamSampler Ram = new();
     static readonly DiskSampler Disk = new();
     static readonly GpuSampler Gpu = new();
+    static readonly GpuEngineSampler GpuEngines = new();
     static DispatcherTimer? _timer;
     static DispatcherTimer? _slow;
     static readonly Dictionary<string, double> Requested = new();
@@ -576,10 +818,13 @@ internal static class SensorHub
     {
         Cpu.Prime();
         Cpu.LoadStatic();
+        CpuCores.Open();
         Ram.LoadStatic();
         Ram.Sample();
-            Disk.Open();
+        Disk.Open();
+        Disk.LoadStatic();
         Gpu.Open(0);
+        GpuEngines.Open();
         StartAiRefresh();
         Sample();
         SetInterval("__start", intervalSeconds);
@@ -635,7 +880,7 @@ internal static class SensorHub
         {
             // WMI clock read is the most expensive source and the value is static on most AMD parts
             _slow = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
-            _slow.Tick += (_, _) => Cpu.RefreshClock();
+            _slow.Tick += (_, _) => { Cpu.RefreshClock(); Disk.LoadStatic(); };
             _slow.Start();
         }
     }
@@ -651,9 +896,11 @@ internal static class SensorHub
     {
         Net.Sample();
         Cpu.Sample();
+        CpuCores.Sample();
         Ram.Sample();
         Disk.Sample();
         Gpu.Sample();
+        GpuEngines.Sample();
 
         var m = new Metrics
         {
@@ -665,6 +912,7 @@ internal static class SensorHub
             CpuMhz = Cpu.CurrentMhz,
             CpuBaseMhz = Cpu.BaseMhz,
             CpuName = Cpu.Name,
+            CpuCores = CpuCores.Cores.ToList(),
             GpuOk = Gpu.Available,
             GpuUtil = Gpu.Util,
             VramUsed = Gpu.VramUsedGb,
@@ -674,6 +922,7 @@ internal static class SensorHub
             TempC = Gpu.TempC,
             ClockMhz = Gpu.ClockMhz,
             GpuName = Gpu.Name,
+            GpuEngines = GpuEngines.Engines.ToList(),
             RamUsed = Ram.UsedGb,
             RamTotal = Ram.TotalGb,
             RamPct = Ram.UsagePct,
@@ -681,6 +930,7 @@ internal static class SensorHub
             DiskOk = Disk.Available,
             DiskRead = Disk.ReadBps,
             DiskWrite = Disk.WriteBps,
+            Disks = Disk.Volumes.ToList(),
             Ai = _ai,
         };
         Current = m;

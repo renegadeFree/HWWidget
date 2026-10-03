@@ -24,12 +24,17 @@ static class SelfTest
             var ram = new RamSampler(); ram.LoadStatic(); ram.Sample();
             var net = new NetSampler();
             var disk = new DiskSampler(); disk.Open();
+            var cores = new CpuCoreSampler(); cores.Open();
+            var engines = new GpuEngineSampler(); engines.Open();
+            disk.LoadStatic();
             using var gpu = new GpuSampler(); bool gpuOk = gpu.Open(0);
 
             System.Threading.Thread.Sleep(1100);
             cpu.Sample(); ram.Sample(); net.Sample(); gpu.Sample(); disk.Sample();
+            cores.Sample(); engines.Sample();
             System.Threading.Thread.Sleep(1100);
             disk.Sample();
+            cores.Sample(); engines.Sample();
 
             Say("cpu", $"{cpu.Name} | base={cpu.BaseMhz}MHz cur={cpu.CurrentMhz}MHz | usage={cpu.Usage:0.0}%");
             Say("ram", $"{ram.UsedGb:0.0}/{ram.TotalGb:0.0} GB ({ram.UsagePct:0.0}%) | {ram.SpeedText}");
@@ -40,11 +45,23 @@ static class SelfTest
             Say("disco", disk.Available
                 ? $"lettura {disk.ReadBps / 1048576:0.00} MB/s · scrittura {disk.WriteBps / 1048576:0.00} MB/s"
                 : "contatori disco non disponibili");
+            Say("cpu-core", cores.Cores.Count > 0
+                ? $"{cores.Cores.Count} core · max {cores.Cores.Max():0}%"
+                : "contatori per-core non disponibili");
+            Say("gpu-engine", engines.Engines.Count > 0
+                ? string.Join(" · ", engines.Engines.Take(8).Select(e => $"{e.Name} {e.Pct:0}%"))
+                : "contatori GPU Engine non disponibili");
+            Say("dischi", disk.Volumes.Count > 0
+                ? string.Join(" · ", disk.Volumes.Select(v => $"{v.Name} {v.TotalGb:0}GB"))
+                : "volumi non letti");
 
             Check(cpu.Usage is >= 0 and <= 100, "cpu usage fuori range");
             Check(cpu.BaseMhz > 0, "clock CPU non letto");
             Check(ram.TotalGb > 1 && ram.UsedGb <= ram.TotalGb, "RAM incoerente");
             Check(net.DownBps >= 0 && net.UpBps >= 0, "throughput negativo");
+            Check(cores.Cores.All(v => v is >= 0 and <= 100), "utilizzo per-core fuori range");
+            Check(engines.Engines.All(e => e.Pct is >= 0 and <= 100), "utilizzo GPU engine fuori range");
+            Check(disk.Volumes.Count > 0, "capacità dei volumi non lette");
             if (disk.Available)
                 Check(disk.ReadBps >= 0 && disk.WriteBps >= 0 && disk.ReadBps < 5e9, "valori disco implausibili");
 
