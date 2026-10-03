@@ -6,6 +6,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using Brush = System.Windows.Media.Brush;
@@ -220,6 +222,18 @@ internal sealed class WidgetView
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             MaxHeight = 320 * _du,
             Content = body,
+            Resources = new ResourceDictionary { [typeof(ScrollBar)] = ModernScrollBar(_p) },
+        };
+        scroll.Loaded += (_, _) =>
+        {
+            scroll.ApplyTemplate();
+            if (scroll.Template.FindName("PART_VerticalScrollBar", scroll) is ScrollBar bar)
+            {
+                bar.Width = 8;
+                bar.MinWidth = 8;
+                bar.MaxWidth = 8;
+                bar.Style = ModernScrollBar(_p);
+            }
         };
         var inner = new Border
         {
@@ -233,9 +247,8 @@ internal sealed class WidgetView
             MinWidth = 170 * _du,
             MaxWidth = 270 * _du,
             CornerRadius = new CornerRadius(10 * _du),
-            // il popup è una finestra separata: la card da sola è troppo trasparente,
-            // quindi usa lo stesso fondo opaco del pannello con sopra la card del widget
-            Background = new SolidColorBrush(_p.Panel),
+            // tinta del pannello sopra il materiale applicato all'HWND del popup
+            Background = new SolidColorBrush(Color.FromArgb(0xD8, _p.Panel.R, _p.Panel.G, _p.Panel.B)),
             BorderBrush = new SolidColorBrush(_p.PanelBorder),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(1),
@@ -258,6 +271,15 @@ internal sealed class WidgetView
             VerticalOffset = 6 * _du,
             HorizontalOffset = 0,
             Child = card,
+        };
+        popup.Opened += (_, _) =>
+        {
+            try
+            {
+                if (PresentationSource.FromVisual(card) is HwndSource src && src.Handle != IntPtr.Zero)
+                    Backdrop.Apply(src.Handle, _c.Backdrop == "none" ? "acrylic" : _c.Backdrop, _p);
+            }
+            catch { }
         };
         box.Unloaded += (_, _) => popup.IsOpen = false;
         box.MouseLeftButtonUp += (_, e) =>
@@ -372,6 +394,44 @@ internal sealed class WidgetView
             row.Children.Add(bar);
         }
         return row;
+    }
+
+    /// <summary>Scrollbar sottile e arrotondata, tinta come il tema del widget.</summary>
+    static Style ModernScrollBar(Palette p)
+    {
+        string thumb = p.IsLight ? "#59000000" : "#73FFFFFF";
+        string xaml = $@"
+<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'
+       xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='ScrollBar'>
+  <Setter Property='Width' Value='8' />
+  <Setter Property='Background' Value='Transparent' />
+  <Setter Property='Template'>
+    <Setter.Value>
+      <ControlTemplate TargetType='ScrollBar'>
+        <Grid Background='Transparent'>
+          <Track x:Name='PART_Track' IsDirectionReversed='True'>
+            <Track.DecreaseRepeatButton>
+              <RepeatButton Command='ScrollBar.PageUpCommand' Opacity='0' Focusable='False' />
+            </Track.DecreaseRepeatButton>
+            <Track.Thumb>
+              <Thumb>
+                <Thumb.Template>
+                  <ControlTemplate TargetType='Thumb'>
+                    <Border Width='5' CornerRadius='2.5' Background='{thumb}' Margin='1.5,0,1.5,0' />
+                  </ControlTemplate>
+                </Thumb.Template>
+              </Thumb>
+            </Track.Thumb>
+            <Track.IncreaseRepeatButton>
+              <RepeatButton Command='ScrollBar.PageDownCommand' Opacity='0' Focusable='False' />
+            </Track.IncreaseRepeatButton>
+          </Track>
+        </Grid>
+      </ControlTemplate>
+    </Setter.Value>
+  </Setter>
+</Style>";
+        return (Style)XamlReader.Parse(xaml);
     }
 
     static ColumnDefinition Star(double weight)
