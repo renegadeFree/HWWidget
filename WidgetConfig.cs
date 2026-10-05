@@ -81,6 +81,8 @@ internal sealed class WidgetConfig
 
     // behaviour
     public bool Topmost { get; set; } = true;
+    /// <summary>Wx+D non minimizza i widget di proprietà del desktop.</summary>
+    public bool KeepOnDesktop { get; set; }
     public bool Locked { get; set; }
     public bool ClickThrough { get; set; }
 

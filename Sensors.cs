@@ -72,6 +72,17 @@ static class Native
     [DllImport("user32.dll")]
     public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr FindWindow(string? className, string? windowName);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string? className, string? windowName);
+
+    /// <summary>Su un HWND top-level GWLP_HWNDPARENT imposta l'owner, non il parent.</summary>
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    public static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
+
+    public const int GWLP_HWNDPARENT = -8;
     [DllImport("user32.dll")]
     public static extern uint GetDpiForWindow(IntPtr hwnd);
 

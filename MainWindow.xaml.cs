@@ -17,6 +17,8 @@ public partial class MainWindow : Window
 {
     const int WM_NCHITTEST = 0x0084;
     const int WM_NCCALCSIZE = 0x0083;
+    const int WM_SYSCOMMAND = 0x0112;
+    const int SC_MINIMIZE = 0xF020;
     const int HTLEFT = 10, HTRIGHT = 11, HTTOP = 12, HTTOPLEFT = 13, HTTOPRIGHT = 14,
               HTBOTTOM = 15, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
 
@@ -99,6 +101,7 @@ public partial class MainWindow : Window
 
         ApplyBackdrop();
         if (_c.ClickThrough) SetClickThrough(true);
+        if (_c.KeepOnDesktop) SetDesktopOwner(true);
     }
 
     // ---------- content ----------
@@ -344,6 +347,12 @@ public partial class MainWindow : Window
 
     IntPtr WndProc(IntPtr hwnd, int msg, IntPtr w, IntPtr l, ref bool handled)
     {
+        // Win+M manda SC_MINIMIZE: il widget "sul desktop" non deve minimizzarsi
+        if (_c.KeepOnDesktop && msg == WM_SYSCOMMAND && ((long)w & 0xFFF0) == SC_MINIMIZE)
+        {
+            handled = true;
+            return IntPtr.Zero;
+        }
         // keep the whole window as client area: with WS_THICKFRAME Windows would otherwise
         // draw a thin translucent frame strip along the top edge
         if (msg == WM_NCCALCSIZE && w != IntPtr.Zero)
@@ -444,6 +453,34 @@ public partial class MainWindow : Window
         Native.SetWindowLong(_hwnd, Native.GWL_EXSTYLE, ex);
         _c.ClickThrough = on;
         _c.Save();
+    }
+
+    /// <summary>Owner = desktop Shell (Progman/WorkerW): Win+D non minimizza le owned window.</summary>
+    public void SetKeepOnDesktop(bool on)
+    {
+        _c.KeepOnDesktop = on;
+        SetDesktopOwner(on);
+        _c.Save();
+    }
+
+    void SetDesktopOwner(bool on)
+    {
+        if (_hwnd == IntPtr.Zero) return;
+        Native.SetWindowLongPtr(_hwnd, Native.GWLP_HWNDPARENT, on ? DesktopShell() : IntPtr.Zero);
+    }
+
+    internal static IntPtr DesktopShell()
+    {
+        IntPtr progman = Native.FindWindow("Progman", null);
+        if (progman != IntPtr.Zero &&
+            Native.FindWindowEx(progman, IntPtr.Zero, "SHELLDLL_DefView", null) != IntPtr.Zero)
+            return progman;
+
+        IntPtr worker = IntPtr.Zero;
+        while ((worker = Native.FindWindowEx(IntPtr.Zero, worker, "WorkerW", null)) != IntPtr.Zero)
+            if (Native.FindWindowEx(worker, IntPtr.Zero, "SHELLDLL_DefView", null) != IntPtr.Zero)
+                return worker;
+        return progman;
     }
 
     public void ToggleClickThrough()
@@ -614,6 +651,7 @@ public partial class MainWindow : Window
         var posizione = SubWithHeader("Posizione",
             monitor,
             Toggle("Sempre in primo piano", _c.Topmost, v => { _c.Topmost = v; Topmost = v; Changed(); }),
+            Toggle("Tieni sul desktop (Win+D)", _c.KeepOnDesktop, v => { SetKeepOnDesktop(v); Changed(); }),
             Toggle("Blocca posizione e dimensioni", _c.Locked, v => { _c.Locked = v; Changed(); }),
             Toggle("HUD: clic attraverso (Ctrl+Alt+H)", _c.ClickThrough, _ => ToggleClickThrough()),
             Leaf("Reimposta posizione", () => { _c.HasPos = false; RestorePosition(); }));
@@ -777,6 +815,7 @@ public partial class MainWindow : Window
         _menuStyles = MenuStyles.Create(_p);
         Foreground = new SolidColorBrush(_p.Text);
         Topmost = _c.Topmost;
+        SetDesktopOwner(_c.KeepOnDesktop);
         Rebuild(true);
         ApplyBackdrop();
         SensorHub.SetInterval(_c.Id, _c.IntervalSeconds);

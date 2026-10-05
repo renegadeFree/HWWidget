@@ -515,6 +515,8 @@ sealed class ControlHub : Window
         SubTitle("Comportamento");
         _content.Children.Add(Card("\uE840", "Sempre in primo piano", "Resta sopra le altre finestre.",
             Switch(() => c.Topmost, v => { c.Topmost = v; Apply(w); })));
+        _content.Children.Add(Card("\uE8A7", "Tieni sul desktop", "Resta visibile anche quando premi Win+D.",
+            Switch(() => c.KeepOnDesktop, v => { c.KeepOnDesktop = v; Apply(w); })));
         _content.Children.Add(Card("\uE72E", "Blocca posizione", "Impedisce spostamento e ridimensionamento.",
             Switch(() => c.Locked, v => { c.Locked = v; Apply(w); })));
         _content.Children.Add(Card("\uE8F4", "HUD: clic attraverso", "Il widget non riceve più i clic (Ctrl+Alt+H per uscire).",

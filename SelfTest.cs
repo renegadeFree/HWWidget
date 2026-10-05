@@ -54,6 +54,8 @@ static class SelfTest
             Say("dischi", disk.Volumes.Count > 0
                 ? string.Join(" · ", disk.Volumes.Select(v => $"{v.Name} {v.TotalGb:0}GB"))
                 : "volumi non letti");
+            var desktopShell = MainWindow.DesktopShell();
+            Say("desktop", desktopShell != IntPtr.Zero ? $"shell desktop 0x{desktopShell:X}" : "shell desktop non trovato");
 
             Check(cpu.Usage is >= 0 and <= 100, "cpu usage fuori range");
             Check(cpu.BaseMhz > 0, "clock CPU non letto");
