@@ -15,16 +15,14 @@ namespace HWWidget;
 sealed class UpdateWindow : Window
 {
     readonly UpdateInfo _info;
-    readonly string _token;
     readonly ProgressBar _bar = new() { Minimum = 0, Maximum = 1, Value = 0, Width = 380 };
     readonly TextBlock _status = new() { Margin = new Thickness(0, 10, 0, 0), Opacity = 0.8 };
     readonly CancellationTokenSource _cancel = new();
 
-    UpdateWindow(UpdateInfo info, string token)
+    UpdateWindow(UpdateInfo info)
     {
         _info = info;
-        _token = token;
-        Title = "Aggiornamento HW Widget";
+        Title = $"{Loc.T("Aggiornamento")} HW Widget";
         Width = 460;
         Height = 220;
         ResizeMode = ResizeMode.NoResize;
@@ -77,6 +75,7 @@ sealed class UpdateWindow : Window
         };
         border.MouseLeftButtonDown += (_, e) => { if (e.LeftButton == System.Windows.Input.MouseButtonState.Pressed) { try { DragMove(); } catch { } } };
         Content = border;
+        Loc.Apply(this);
 
         Loaded += (_, _) => Backdrop.Apply(new WindowInteropHelper(this).Handle, "blur", Palette.For("dark"));
     }
@@ -89,14 +88,14 @@ sealed class UpdateWindow : Window
     }
 
     /// <summary>Chiede conferma e, se accettata, esegue l'aggiornamento.</summary>
-    public static void Start(UpdateInfo info, string token)
+    public static void Start(UpdateInfo info)
     {
         var answer = MessageBox.Show(
             $"Nuova versione {info.Tag} disponibile ({info.Size / 1048576.0:0} MB).\n\nScaricare e installare adesso?",
             "Aggiornamento HW Widget", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (answer != MessageBoxResult.Yes) return;
 
-        var window = new UpdateWindow(info, token);
+        var window = new UpdateWindow(info);
         window.Show();
         _ = window.RunAsync();
     }
@@ -111,7 +110,7 @@ sealed class UpdateWindow : Window
                 _bar.Value = p;
                 _status.Text = $"Download in corso… {p:P0}";
             });
-            string path = await Updater.DownloadAsync(_info, _token, progress, _cancel.Token);
+            string path = await Updater.DownloadAsync(_info, progress, _cancel.Token);
             _status.Text = "Installazione e riavvio…";
             _bar.Value = 1;
             await Task.Delay(600);

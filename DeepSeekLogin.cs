@@ -26,7 +26,7 @@ sealed class DeepSeekLogin : Window
 
     public DeepSeekLogin()
     {
-        Title = "DeepSeek — token di utilizzo";
+        Title = $"DeepSeek — {Loc.T("Token di utilizzo")}";
         Width = 1020;
         Height = 740;
         MinWidth = 620;
@@ -42,6 +42,7 @@ sealed class DeepSeekLogin : Window
         if (icon != null) Icon = icon;
 
         Content = BuildShell();
+        Loc.Apply(this);
         _status.Style = (Style)Resources["HubCardDesc"];
 
         Loaded += async (_, _) => await StartAsync();

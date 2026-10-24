@@ -16,12 +16,11 @@ sealed class UpdateInfo
     public Version Version = new(0, 0);
     public string Tag = "";
     public string AssetName = "";
-    public string AssetUrl = "";      // API url (funziona con le repo private)
+    public string AssetUrl = "";      // API url della release pubblica
     public long Size;
 }
 
-/// <summary>Auto-update dalle release GitHub. La repo è pubblica: il token è opzionale,
-/// serve solo ad alzare il limite di richieste dell'API (60/ora per IP senza token).</summary>
+/// <summary>Auto-update dalle release pubbliche GitHub, senza credenziali.</summary>
 static class Updater
 {
     public const string Repo = "renegadeFree/HWWidget";
@@ -32,11 +31,10 @@ static class Updater
 
     public static string CurrentText => $"{Current.Major}.{Current.Minor}.{Current.Build}";
 
-    public static async Task<UpdateInfo?> CheckAsync(string token, CancellationToken ct = default)
+    public static async Task<UpdateInfo?> CheckAsync(CancellationToken ct = default)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get,
             $"https://api.github.com/repos/{Repo}/releases/latest");
-        if (!string.IsNullOrWhiteSpace(token)) req.Headers.Add("Authorization", "token " + token.Trim());
         req.Headers.Add("User-Agent", "HWWidget");
         req.Headers.Add("Accept", "application/vnd.github+json");
         using var res = await Http.SendAsync(req, ct);
@@ -62,12 +60,11 @@ static class Updater
 
     public static bool IsNewer(UpdateInfo info) => info.Version > Current;
 
-    public static async Task<string> DownloadAsync(UpdateInfo info, string token, IProgress<double>? progress,
+    public static async Task<string> DownloadAsync(UpdateInfo info, IProgress<double>? progress,
                                                    CancellationToken ct = default)
     {
         string path = Path.Combine(Path.GetTempPath(), $"HWWidgetSetup-{info.Tag}.exe");
         using var req = new HttpRequestMessage(HttpMethod.Get, info.AssetUrl);
-        if (!string.IsNullOrWhiteSpace(token)) req.Headers.Add("Authorization", "token " + token.Trim());
         req.Headers.Add("User-Agent", "HWWidget");
         req.Headers.Add("Accept", "application/octet-stream");
         using var res = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -111,12 +108,11 @@ static class Updater
         try
         {
             Log($"versione installata {CurrentText}");
-            var keys = AiKeys.Load();
-            var info = CheckAsync(keys.GitHub).GetAwaiter().GetResult();
+            var info = CheckAsync().GetAwaiter().GetResult();
             if (info == null) { Log("nessuna release leggibile"); return "no-release"; }
             Log($"release trovata {info.Tag} · {info.AssetName} ({info.Size / 1048576.0:0} MB)");
             if (!IsNewer(info)) { Log("sei aggiornato"); return "updated"; }
-            string path = DownloadAsync(info, keys.GitHub, null).GetAwaiter().GetResult();
+            string path = DownloadAsync(info, null).GetAwaiter().GetResult();
             Log($"scaricato {new FileInfo(path).Length / 1048576.0:0.0} MB in {path}");
             RunInstaller(path, exitApp: false);
             Log("installer avviato");

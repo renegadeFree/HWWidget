@@ -60,8 +60,8 @@ sealed class AppController : IDisposable
             var keys = AiKeys.Load();
             if (!keys.CheckUpdatesOnStartup) return;
             await Task.Delay(8000);                       // lascia respirare l'avvio
-            var info = await Updater.CheckAsync(keys.GitHub);
-            if (info != null && Updater.IsNewer(info)) UpdateWindow.Start(info, keys.GitHub);
+            var info = await Updater.CheckAsync();
+            if (info != null && Updater.IsNewer(info)) UpdateWindow.Start(info);
         }
         catch { }
     }
@@ -363,6 +363,7 @@ sealed class TrayIcon : IDisposable
         menu.Items.Add(startup);
         menu.Items.Add(new Separator());
         menu.Items.Add(Leaf("Esci da HW Widget", () => _app.ExitAll()));
+        Loc.Apply(menu);
         menu.IsOpen = true;
     }
 

@@ -107,6 +107,7 @@ internal sealed class WidgetView
     {
         foreach (var b in _binds) b(m);
         foreach (var b in _detailBinds) b(m);
+        Loc.Apply(Root);
     }
 
     public int BoundCount => _binds.Count;
@@ -301,7 +302,7 @@ internal sealed class WidgetView
     void FillDetails(StackPanel body, string el, Metrics m)
     {
         body.Children.Clear();
-        var title = Txt($"{ElName(el)} · dettagli", 9 * _du, new SolidColorBrush(_p.TextDim), bold: true);
+        var title = Txt($"{ElName(el)} · {Loc.T("Dettagli")}", 9 * _du, new SolidColorBrush(_p.TextDim), bold: true);
         title.Margin = new Thickness(0, 0, 0, 7 * _du);
         body.Children.Add(title);
         switch (el)
@@ -351,6 +352,7 @@ internal sealed class WidgetView
                     body.Children.Add(DetailRow("Link", $"{m.NetLink / 1e9:0.0} Gbps"));
                 break;
         }
+        Loc.Apply(body);
     }
 
     FrameworkElement DetailRow(string label, string value, double pct = -1, Brush? color = null)

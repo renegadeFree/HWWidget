@@ -147,6 +147,11 @@ static class SelfTest
                 Check(wanted > 60, $"layout {layout}: contenuto troppo basso ({wanted:0})");
                 Say("layout", $"{layout}: {elements} elementi, {rows} righe, {view.BoundCount} bind, contenuto {wanted:0} DIP a 300 di larghezza");
             }
+            Check(Loc.Languages.Length == 14, $"lingue disponibili: {Loc.Languages.Length} invece di 14");
+            Check(Loc.For("en-GB", "Uso") == "Usage", "catalogo inglese non caricato");
+            Check(Loc.For("ru-RU", "Uso") != "Uso", "catalogo russo non caricato");
+            Check(Loc.For("ar-SA", "Dettagli") == "التفاصيل", "catalogo arabo non caricato");
+            Say("lingue", $"{Loc.Languages.Length} locale · fallback inglese per i testi lunghi");
             Check(WidgetView.Mem(24, 64).Contains("GB") && !WidgetView.Mem(24, 64).Contains('%'),
                   "RAM/VRAM mostrate ancora in percentuale");
             Say("memoria", $"formato RAM/VRAM: {WidgetView.Mem(24, 64)}");
@@ -319,10 +324,13 @@ static class SelfTest
             Check(AiUsage.Tokens(254976079).EndsWith("M"), "formattazione token errata");
             Say("update", $"versione corrente {Updater.CurrentText} · repo {Updater.Repo}");
             // repo pubblica: il controllo deve funzionare anche senza token (è il caso normale)
-            var release = Updater.CheckAsync("").GetAwaiter().GetResult();
+            var release = Updater.CheckAsync().GetAwaiter().GetResult();
             Check(release != null, "release non leggibile senza token: la repo è pubblica?");
             Say("update-check", $"senza token: ultima release {release!.Tag} ({release.AssetName}, {release.Size / 1048576.0:0} MB) · " +
                                 $"aggiornamento disponibile: {(Updater.IsNewer(release) ? "sì" : "no")}");
+            _ = AiKeys.Load();   // esegue anche la pulizia delle vecchie copie cifrate
+            Check(typeof(AiKeys).GetProperty("GitHub") == null, "campo token GitHub ancora presente");
+            Say("security", "token GitHub rimosso; aggiornamenti senza credenziali");
 
             // autostart: same registry value the menus write
             const string runKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -747,11 +755,11 @@ static class SelfTest
         AttachConsole(-1);
         try
         {
-            var info = Updater.CheckAsync("").GetAwaiter().GetResult();
+            var info = Updater.CheckAsync().GetAwaiter().GetResult();
             if (info == null) { Say("update", "nessuna release leggibile"); return; }
             Say("update", $"release {info.Tag}, asset {info.AssetName} ({info.Size / 1048576.0:0} MB)");
             var progress = new Progress<double>(p => { if (Math.Abs(p * 100 % 10) < 0.001) Say("update", $"  {p:P0}"); });
-            string path = Updater.DownloadAsync(info, "", progress).GetAwaiter().GetResult();
+            string path = Updater.DownloadAsync(info, progress).GetAwaiter().GetResult();
             var fi = new System.IO.FileInfo(path);
             Say("update", $"scaricato {fi.Name}: {fi.Length / 1048576.0:0.0} MB in {path}");
             System.IO.File.Delete(path);

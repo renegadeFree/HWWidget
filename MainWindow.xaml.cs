@@ -176,6 +176,7 @@ public partial class MainWindow : Window
         }
 
         Host.Content = _view.Root;
+        Loc.Apply(this);
         _view.Bind(SensorHub.Current);
     }
 
@@ -540,6 +541,7 @@ public partial class MainWindow : Window
         base.OnMouseRightButtonUp(e);
         if (_c.ClickThrough) return;
         var menu = BuildMenu();
+        Loc.Apply(menu);
         menu.Resources = _menuStyles;
         menu.PlacementTarget = this;
         menu.IsOpen = true;

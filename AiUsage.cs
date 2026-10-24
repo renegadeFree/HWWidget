@@ -37,7 +37,6 @@ sealed class AiKeys
     public string DeepSeek { get; set; } = "";
     public string OpenAi { get; set; } = "";
     public string Anthropic { get; set; } = "";
-    public string GitHub { get; set; } = "";      // opzionale: alza il limite delle API GitHub
     /// <summary>Token di sessione di platform.deepseek.com (uso e spesa): l'API ufficiale
     /// DeepSeek espone solo il saldo. Si prende dal browser: console → JSON.parse(localStorage.userToken).value</summary>
     public string DeepSeekUsage { get; set; } = "";
@@ -45,9 +44,11 @@ sealed class AiKeys
     public bool CheckUpdatesOnStartup { get; set; } = true;
 
     static string File => Path.Combine(WidgetConfig.Dir, "keys.dat");
+    static bool _legacyScrubbed;
 
     public static AiKeys Load()
     {
+        ScrubLegacyGitHub();
         try
         {
             if (!System.IO.File.Exists(File)) return new AiKeys();
@@ -62,6 +63,25 @@ sealed class AiKeys
                 return JsonSerializer.Deserialize<AiKeys>(json) ?? new AiKeys();
             }
             catch { return new AiKeys(); }
+        }
+    }
+
+    /// <summary>Rimuove il vecchio token GitHub anche dalle copie cifrate già presenti.</summary>
+    static void ScrubLegacyGitHub()
+    {
+        if (_legacyScrubbed) return;
+        _legacyScrubbed = true;
+        foreach (var path in new[] { File, File + ".bak" })
+        {
+            try
+            {
+                if (!System.IO.File.Exists(path)) continue;
+                string json = Secret.Unprotect(System.IO.File.ReadAllBytes(path));
+                if (!json.Contains("\"GitHub\"", StringComparison.Ordinal)) continue;
+                var clean = JsonSerializer.Deserialize<AiKeys>(json) ?? new AiKeys();
+                System.IO.File.WriteAllBytes(path, Secret.Protect(JsonSerializer.Serialize(clean)));
+            }
+            catch { }
         }
     }
 

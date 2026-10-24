@@ -236,6 +236,7 @@ sealed class ControlHub : Window
         });
         _nav.Children.Add(NavItem("\uE713", "Impostazioni app", "Avvio, tray, uscita", _app.Widgets.Count + 1));
 
+        Title = $"{Loc.T("Hub di controllo")} — HW Widget";
         ShowPage(Math.Min(_page, _app.Widgets.Count + 1));
     }
 
@@ -275,6 +276,7 @@ sealed class ControlHub : Window
         else if (page == _app.Widgets.Count + 1) BuildAppPage();
         else if (page - 1 < _app.Widgets.Count) BuildWidgetPage(_app.Widgets[page - 1]);
         else BuildAddPage();
+        Loc.Apply(this);
     }
 
     void BuildAddPage()
@@ -303,6 +305,16 @@ sealed class ControlHub : Window
     {
         PageHeader("Impostazioni app", "Comportamento generale di HW Widget su questo PC.");
 
+        SubTitle("Lingua");
+        _content.Children.Add(Card("\uE774", "Lingua", "Lingua dell'interfaccia.",
+            Combo(Loc.Languages.Select(l => l.Code).ToArray(), Loc.Languages.Select(l => l.Name).ToArray(),
+                () => Loc.Current, v =>
+                {
+                    Loc.Set(v);
+                    foreach (var w in _app.Widgets) w.ApplyConfig();
+                    Rebuild();
+                })));
+
         var keys = AiKeys.Load();
         SubTitle("AI e chiavi API");
         _content.Children.Add(CardFull("\uE945", "Questa sezione",
@@ -322,7 +334,6 @@ sealed class ControlHub : Window
         (FrameworkElement deepSeekUsageRow, PasswordBox deepSeekUsage) = KeyRow("Token di utilizzo DeepSeek", keys.DeepSeekUsage);
         (FrameworkElement openAiRow, PasswordBox openAi) = KeyRow("OpenAI admin key", keys.OpenAi);
         (FrameworkElement anthropicRow, PasswordBox anthropic) = KeyRow("Anthropic admin key", keys.Anthropic);
-        (FrameworkElement githubRow, PasswordBox github) = KeyRow("Token GitHub (opzionale, solo per il limite API)", keys.GitHub);
         var interval = Combo(new[] { "5", "15", "60", "180" },
             new[] { "5 minuti", "15 minuti", "1 ora", "3 ore" },
             () => keys.RefreshMinutes.ToString(),
@@ -334,7 +345,6 @@ sealed class ControlHub : Window
             keys.DeepSeekUsage = AiKeys.Normalize(deepSeekUsage.Password);
             keys.OpenAi = openAi.Password.Trim();
             keys.Anthropic = anthropic.Password.Trim();
-            keys.GitHub = github.Password.Trim();
             keys.Save();
             _ = SensorHub.RefreshAiAsync();
             Rebuild();
@@ -373,7 +383,7 @@ sealed class ControlHub : Window
             if (b.Content?.ToString()?.StartsWith("Verifica") == true) b.Margin = new Thickness(8, 0, 0, 0);
         // CardFull: con la card normale i campi stretti schiacciano la descrizione in verticale
         _content.Children.Add(CardFull("\uE72C", "Chiavi", "Salvate cifrate (DPAPI) in " + Path.Combine(WidgetConfig.Dir, "keys.dat"),
-            NewColumn(deepSeekRow, deepSeekUsageRow, openAiRow, anthropicRow, githubRow, interval, saveRow, verifyRow, dsStatus)));
+            NewColumn(deepSeekRow, deepSeekUsageRow, openAiRow, anthropicRow, interval, saveRow, verifyRow, dsStatus)));
 
         SubTitle("Aggiornamenti");
         var updateInfo = new TextBlock
@@ -705,13 +715,12 @@ sealed class ControlHub : Window
 
     async Task CheckUpdates(TextBlock status)
     {
-        var keys = AiKeys.Load();
         status.Text = "Controllo in corso…";
-        var info = await Updater.CheckAsync(keys.GitHub);
+        var info = await Updater.CheckAsync();
         if (info == null)
         {
             status.Text = $"Nessuna release leggibile da GitHub (versione installata {Updater.CurrentText}). " +
-                          "Controlla la connessione; con molti controlli ravvicinati aggiungi un token qui sopra.";
+                          "Controlla la connessione e riprova.";
             return;
         }
         if (!Updater.IsNewer(info))
@@ -720,7 +729,7 @@ sealed class ControlHub : Window
             return;
         }
         status.Text = $"Nuova versione {info.Tag} disponibile.";
-        UpdateWindow.Start(info, keys.GitHub);
+        UpdateWindow.Start(info);
     }
 
     FrameworkElement Expander(string glyph, string title, string description,
@@ -831,14 +840,14 @@ sealed class ControlHub : Window
     FrameworkElement Combo(string[] values, string[] names, Func<string> get, Action<string> set)
     {
         var combo = new ComboBox { Style = (Style)Resources["HubCombo"], MinWidth = 170 };
-        for (int i = 0; i < values.Length; i++) combo.Items.Add(new ComboBoxItem { Content = names[i], Tag = values[i] });
+        for (int i = 0; i < values.Length; i++) combo.Items.Add(new ComboBoxItem { Content = Loc.T(names[i]), Tag = values[i] });
+        string current = get();
+        int index = Array.IndexOf(values, current);
+        combo.SelectedIndex = index >= 0 ? index : 0;
         combo.SelectionChanged += (_, _) =>
         {
             if (combo.SelectedItem is ComboBoxItem item && item.Tag is string v) set(v);
         };
-        string current = get();
-        int index = Array.IndexOf(values, current);
-        combo.SelectedIndex = index >= 0 ? index : 0;
         return combo;
     }
 
