@@ -85,14 +85,23 @@ public sealed class Sparkline : FrameworkElement
         if (w < 3 || h < 3) return;
 
         int vis = Math.Min(Math.Max(WindowSamples, 2), Series.Count);
+        double vmax = VMax > 0 ? VMax : AutoMax(vis);
+        if (vmax <= 0) vmax = 1;
         if (vis < 2)
         {
-            if (GraphStyle != HWWidget.GraphStyle.Bars) dc.DrawLine(GridPen, new Point(0, h - 0.5), new Point(w, h - 0.5));
+            if (vis == 1 && GraphStyle == HWWidget.GraphStyle.Bars)
+            {
+                int one = (Series.Head - 1 + 1200 * 8) % 1200;
+                dc.PushOpacityMask(EdgeFade(w));
+                DrawBars(dc, false, one, 1, w, h, vmax, StrokeA);
+                if (Series.HasB) DrawBars(dc, true, one, 1, w, h, vmax, StrokeB);
+                dc.Pop();
+            }
+            else if (GraphStyle != HWWidget.GraphStyle.Bars)
+                dc.DrawLine(GridPen, new Point(0, h - 0.5), new Point(w, h - 0.5));
             return;
         }
 
-        double vmax = VMax > 0 ? VMax : AutoMax(vis);
-        if (vmax <= 0) vmax = 1;
         int start = (Series.Head - vis + 1200 * 8) % 1200;
 
         // sfumatura verso i bordi del box: il grafico arriva ai lati e si spegne dolcemente

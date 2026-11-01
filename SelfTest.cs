@@ -103,6 +103,20 @@ static class SelfTest
             }
             Say("grafici", "1200 campioni, finestra scorrevole OK su 4 stili (area, linea, barre, scalini)");
 
+            var oneBar = new Sparkline { WindowSamples = 2, VMax = 0, GraphStyle = GraphStyle.Bars };
+            oneBar.Push(100);
+            oneBar.Measure(new System.Windows.Size(80, 40));
+            oneBar.Arrange(new System.Windows.Rect(0, 0, 80, 40));
+            var oneBarPng = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                80, 40, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            oneBarPng.Render(oneBar);
+            var oneBarPixels = new byte[80 * 40 * 4];
+            oneBarPng.CopyPixels(oneBarPixels, 80 * 4, 0);
+            int lit = 0;
+            for (int i = 3; i < oneBarPixels.Length; i += 4) if (oneBarPixels[i] > 0) lit++;
+            Check(lit > 0, "una sola barra giornaliera non viene disegnata");
+            Say("bars-one", $"grafico con un solo giorno: {lit} pixel disegnati");
+
             // config: a broken file must be repaired, and element presets must stay valid
             var broken = new WidgetConfig
             {
