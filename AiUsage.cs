@@ -183,9 +183,12 @@ static class AiUsage
         {
             try
             {
-                var start = DateTime.UtcNow.Date.AddDays(-30).ToString("yyyy-MM-dd");
+                // start_time/end_time sono timestamp Unix, non date: con "yyyy-MM-dd" l'API
+                // rispondeva 400 e la spesa restava silenziosamente "n/d".
+                long from = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(-30)).ToUnixTimeSeconds();
+                long to = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 using var req = new HttpRequestMessage(HttpMethod.Get,
-                    $"https://api.openai.com/v1/organization/costs?start_time={start}&limit=31&bucket_width=1d");
+                    $"https://api.openai.com/v1/organization/costs?start_time={from}&end_time={to}&bucket_width=1d&limit=31");
                 req.Headers.Add("Authorization", "Bearer " + keys.OpenAi);
                 using var res = await Http.SendAsync(req);
                 string body = await res.Content.ReadAsStringAsync();
@@ -206,9 +209,11 @@ static class AiUsage
         {
             try
             {
-                var start = DateTime.UtcNow.Date.AddDays(-30).ToString("yyyy-MM-dd");
+                // starting_at vuole una data RFC 3339, non "yyyy-MM-dd"
+                string from = DateTime.UtcNow.Date.AddDays(-30)
+                    .ToString("yyyy-MM-dd'T'00:00:00'Z'", CultureInfo.InvariantCulture);
                 using var req = new HttpRequestMessage(HttpMethod.Get,
-                    $"https://api.anthropic.com/v1/organizations/cost_report?starting_at={start}&bucket_width=1d&limit=31");
+                    $"https://api.anthropic.com/v1/organizations/cost_report?starting_at={from}&bucket_width=1d&limit=31");
                 req.Headers.Add("x-api-key", keys.Anthropic);
                 req.Headers.Add("anthropic-version", "2023-06-01");
                 using var res = await Http.SendAsync(req);
@@ -758,6 +763,10 @@ static class ClaudeLogs
 {
     static string Root => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "projects");
 
+    /// <summary>I file vengono riletti solo quando cambiano: prima ogni refresh (15 min)
+    /// rileggeva da zero tutti i log dei 30 giorni.</summary>
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long length, DateTime write, double tokens)> Cache = new();
+
     public static (double total, double week) SumTokens()
     {
         double total = 0, week = 0;
@@ -768,16 +777,24 @@ static class ClaudeLogs
             try
             {
                 var info = new FileInfo(file);
-                if (info.LastWriteTime < from) continue;          // ponytail: solo i file recenti
-                bool inWeek = info.LastWriteTime >= DateTime.Now.AddDays(-7);
-                foreach (var line in ReadLines(file))
+                if (info.LastWriteTime < from) continue;          // solo i file recenti
+                double tokens;
+                if (Cache.TryGetValue(file, out var hit) && hit.length == info.Length && hit.write == info.LastWriteTime)
+                    tokens = hit.tokens;
+                else
                 {
-                    if (!line.Contains("\"usage\"")) continue;
-                    double t = TokensOf(line);
-                    if (t <= 0) continue;
-                    total += t;
-                    if (inWeek) week += t;
+                    tokens = 0;
+                    foreach (var line in ReadLines(file))
+                    {
+                        if (!line.Contains("\"usage\"")) continue;
+                        tokens += TokensOf(line);
+                    }
+                    Cache[file] = (info.Length, info.LastWriteTime, tokens);
                 }
+                if (tokens <= 0) continue;
+                total += tokens;
+                bool inWeek = info.LastWriteTime >= DateTime.Now.AddDays(-7);
+                if (inWeek) week += tokens;
             }
             catch { }
         }

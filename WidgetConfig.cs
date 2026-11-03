@@ -232,9 +232,46 @@ internal sealed class WidgetConfig
         return ids;
     }
 
+    /// <summary>Tutti gli id presenti su disco, chiusi compresi: riusare l'id di un widget
+    /// chiuso ne sovrascriverebbe la configurazione conservata.</summary>
+    public static List<string> UsedIds()
+    {
+        var ids = new List<string>();
+        try
+        {
+            if (!Directory.Exists(Dir)) return ids;
+            foreach (var f in Directory.GetFiles(Dir, "settings*.json"))
+            {
+                string name = Path.GetFileNameWithoutExtension(f);
+                string id = name == "settings" ? "main"
+                    : name.StartsWith("settings-", StringComparison.Ordinal) ? name["settings-".Length..] : "";
+                if (id.Length > 0 && !ids.Contains(id)) ids.Add(id);
+            }
+            ids.Sort(StringComparer.OrdinalIgnoreCase);
+        }
+        catch { }
+        return ids;
+    }
+
+    /// <summary>Widget chiusi dall'utente: il file resta, si possono riaprire dall'hub.</summary>
+    public static List<string> ClosedInstances()
+    {
+        var ids = new List<string>();
+        foreach (var id in UsedIds())
+        {
+            try
+            {
+                var cfg = Read(FileOf(id));
+                if (cfg?.Closed == true) ids.Add(id);
+            }
+            catch { }
+        }
+        return ids;
+    }
+
     public static string NewId()
     {
-        var used = Instances();
+        var used = UsedIds();
         for (int i = 2; i < 100; i++)
         {
             string id = "w" + i;
@@ -306,6 +343,19 @@ internal sealed class WidgetConfig
 
 sealed class Palette
 {
+    /// <summary>Colori proposti nei menu e nell'hub (stessa lista in entrambi).</summary>
+    public static readonly (string Name, string Hex)[] Swatches =
+    {
+        ("Blu", "#4CC2FF"),
+        ("Verde", "#5CD66E"),
+        ("Ambra", "#FFB84D"),
+        ("Rosso", "#FF5B5B"),
+        ("Viola", "#A78BFA"),
+        ("Turchese", "#4FD1C5"),
+        ("Rosa", "#FF7AC6"),
+        ("Grigio", "#B0B6BF"),
+    };
+
     public bool IsLight;
     public System.Windows.Media.Color Panel;
     public System.Windows.Media.Color PanelBorder;

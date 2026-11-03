@@ -304,5 +304,9 @@ static class Loc
     Hub di controllo…|Control Hub…
     Chiudi questo widget|Close this widget
     Esci da HW Widget|Exit HW Widget
+    Widget chiusi|Closed widgets
+    Riapri|Reopen
+    Configurazione salvata: si riapre con posizione, dimensioni e layout originali.|Saved configuration: reopens with the original position, size and layout.
+    La configurazione resta salvata e si può riaprire da Impostazioni app.|The configuration is kept and can be reopened from App settings.
     """;
 }

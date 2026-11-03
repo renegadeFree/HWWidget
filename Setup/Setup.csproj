@@ -15,6 +15,9 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
   <ItemGroup>
-    <EmbeddedResource Include="..\dist-sc\HWWidget.exe" LogicalName="HWWidget.exe" />
+    <!-- payload prodotto da "dotnet publish ... -o dist-sc"; se manca, l'installer
+         compila ma segnala il payload assente a runtime -->
+    <EmbeddedResource Include="..\dist-sc\HWWidget.exe" LogicalName="HWWidget.exe"
+                      Condition="Exists('..\dist-sc\HWWidget.exe')" />
   </ItemGroup>
 </Project>

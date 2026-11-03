@@ -546,6 +546,20 @@ static class SelfTest
             // impostazioni: giro completo e recupero se il file resta troncato
             SettingsPersistTest();
 
+            // widget chiusi: restano su disco, non si riaprono all'avvio, non vengono riusati
+            const string closedId = "selftest-closed";
+            DeleteConfig(closedId);
+            new WidgetConfig { Id = closedId, Closed = true }.Sanitized().Save();
+            try
+            {
+                Check(!WidgetConfig.Instances().Contains(closedId), "un widget chiuso è stato riaperto all'avvio");
+                Check(WidgetConfig.UsedIds().Contains(closedId), "UsedIds non vede il widget chiuso");
+                Check(WidgetConfig.NewId() != closedId, "NewId ha riusato l'id di un widget chiuso");
+                Check(WidgetConfig.ClosedInstances().Contains(closedId), "ClosedInstances non elenca il widget chiuso");
+                Say("widget-chiusi", "id chiusi: non riaperti all'avvio, esclusi da NewId, elencati per la riapertura");
+            }
+            finally { DeleteConfig(closedId); }
+
             // costo del riadattamento: gira a ogni ridimensionamento e a ogni modifica dall'hub
             var probe = new MainWindow(WidgetConfig.Load("main"));
             var sw = System.Diagnostics.Stopwatch.StartNew();
