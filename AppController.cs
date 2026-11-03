@@ -31,7 +31,19 @@ sealed class AppController : IDisposable
     readonly List<MainWindow> _windows = new();
     TrayIcon? _tray;
     HwndSource? _hotkeySink;
-    readonly DispatcherTimer _trayClickTimer = new() { Interval = TimeSpan.FromMilliseconds(280) };
+
+    /// <summary>Preset di creazione: unica fonte per tray, menu del widget e hub.</summary>
+    public static readonly (string? Key, string Label)[] Presets =
+    {
+        (null, "Tutto"),
+        ("cpu", "Solo CPU"),
+        ("gpu", "Solo GPU"),
+        ("ram", "Solo RAM"),
+        ("net", "Solo rete"),
+        ("cpugpu", "CPU + GPU"),
+        ("ai", "Solo AI"),
+        ("ds", "Solo DeepSeek"),
+    };
 
     public AppController() => Current = this;
 
@@ -100,6 +112,16 @@ sealed class AppController : IDisposable
         }
         c.Sanitized().Save();
         Open(c);
+    }
+
+    /// <summary>Riapre un widget chiuso mantenendo posizione, dimensioni e layout salvati.</summary>
+    public void ReopenWidget(string id)
+    {
+        if (_windows.Any(w => w.InstanceId == id)) return;
+        var cfg = WidgetConfig.Load(id);
+        cfg.Closed = false;
+        cfg.Save();
+        Open(cfg);
     }
 
     void Remove(MainWindow w)
@@ -207,12 +229,14 @@ sealed class AppController : IDisposable
 
     // ---------- rendering mode (NVIDIA overlay workaround) ----------
 
-    public void ApplyRenderMode()
+    /// <summary>Il render mode è per processo: senza argomento vale il primo widget, ma chi
+    /// cambia l'opzione passa il proprio valore (altrimenti la scelta andrebbe persa).</summary>
+    public void ApplyRenderMode(bool? software = null)
     {
-        bool software = _windows.Count > 0
+        bool useSoftware = software ?? (_windows.Count > 0
             ? _windows[0].SoftwareRender
-            : WidgetConfig.Load("main").SoftwareRender;
-        RenderOptions.ProcessRenderMode = software ? RenderMode.SoftwareOnly : RenderMode.Default;
+            : WidgetConfig.Load("main").SoftwareRender);
+        RenderOptions.ProcessRenderMode = useSoftware ? RenderMode.SoftwareOnly : RenderMode.Default;
     }
 
     // ---------- global hotkey: HUD mode escape hatch ----------
@@ -331,13 +355,8 @@ sealed class TrayIcon : IDisposable
         }
 
         var nuovo = new MenuItem { Header = "Nuovo widget" };
-        nuovo.Items.Add(Leaf("Tutto", () => _app.NewWidget(null)));
-        nuovo.Items.Add(Leaf("Solo CPU", () => _app.NewWidget("cpu")));
-        nuovo.Items.Add(Leaf("Solo GPU", () => _app.NewWidget("gpu")));
-        nuovo.Items.Add(Leaf("Solo RAM", () => _app.NewWidget("ram")));
-        nuovo.Items.Add(Leaf("Solo rete", () => _app.NewWidget("net")));
-        nuovo.Items.Add(Leaf("CPU + GPU", () => _app.NewWidget("cpugpu")));
-        nuovo.Items.Add(Leaf("Solo DeepSeek", () => _app.NewWidget("ds")));
+        foreach (var (key, label) in AppController.Presets)
+            nuovo.Items.Add(Leaf(label, () => _app.NewWidget(key)));
 
         var startup = new MenuItem { Header = "Avvia con Windows", IsCheckable = true, IsChecked = _app.StartupEnabled };
         startup.Click += (_, _) => _app.SetStartup(startup.IsChecked);

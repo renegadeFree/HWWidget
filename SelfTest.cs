@@ -135,6 +135,19 @@ static class SelfTest
             Check(light.IsLight && !dark.IsLight, "flag tema errati");
             Say("palette", $"scuro testo=#{dark.Text.R:X2}{dark.Text.G:X2}{dark.Text.B:X2} chiaro testo=#{light.Text.R:X2}{light.Text.G:X2}{light.Text.B:X2}");
 
+            // widget chiusi: restano su disco, non si riaprono all'avvio, non vengono riusati
+            var closedProbe = new WidgetConfig { Id = "selftest-closed", Closed = true }.Sanitized();
+            closedProbe.Save();
+            try
+            {
+                Check(!WidgetConfig.Instances().Contains("selftest-closed"), "un widget chiuso è stato riaperto all'avvio");
+                Check(WidgetConfig.UsedIds().Contains("selftest-closed"), "UsedIds non vede il widget chiuso");
+                Check(WidgetConfig.NewId() != "selftest-closed", "NewId ha riusato l'id di un widget chiuso");
+                Check(WidgetConfig.ClosedInstances().Contains("selftest-closed"), "ClosedInstances non elenca il widget chiuso");
+                Say("widget-chiusi", "id chiusi: non riaperti all'avvio, esclusi da NewId, elencati per la riapertura");
+            }
+            finally { closedProbe.Delete(); }
+
             // posizione e dimensioni: giro completo su finestre vere (salva → riapri → stesso rettangolo)
             WindowGeometryTest();
 

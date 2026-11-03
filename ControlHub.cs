@@ -32,10 +32,7 @@ sealed class ControlHub : Window
     static readonly string[] DurationNames = { "30 secondi", "1 minuto", "3 minuti", "5 minuti", "10 minuti" };
     static readonly string[] Intervals = { "0.5", "1", "2" };
     static readonly string[] IntervalNames = { "0,5 s", "1 s", "2 s" };
-    static readonly string[] Swatches =
-    {
-        "#4CC2FF", "#5CD66E", "#FFB84D", "#FF5B5B", "#A78BFA", "#4FD1C5", "#FF7AC6", "#B0B6BF",
-    };
+    static IEnumerable<string> Swatches => Palette.Swatches.Select(s => s.Hex);
     static readonly (string Key, string Name, string Glyph)[] Meters =
     {
         ("cpu", "CPU", "\uE950"),
@@ -93,6 +90,14 @@ sealed class ControlHub : Window
         var src = HwndSource.FromHwnd(_hwnd);
         if (src?.CompositionTarget != null) src.CompositionTarget.BackgroundColor = Colors.Transparent;
         Backdrop.Apply(_hwnd, "blur", _p);
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        // il DispatcherTimer è rooted dal dispatcher: senza Stop() terrebbe viva la finestra
+        // chiusa e continuerebbe a ricostruire le pagine ogni 2 secondi
+        _watch.Stop();
+        base.OnClosed(e);
     }
 
     // ---------- shell ----------
@@ -415,11 +420,29 @@ sealed class ControlHub : Window
         _content.Children.Add(Card("\uE74D", "Chiudi tutti i widget", "Restano salvati: puoi riaprirli da qui.",
             TextButton("Chiudi tutti", () =>
             {
-                foreach (var w in _app.Widgets.ToList()) w.Close();
+                foreach (var w in _app.Widgets.ToList()) w.RequestClose();
                 Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(Rebuild));
             })));
         _content.Children.Add(Card("\uE7E8", "Uscita", "Termina HW Widget e rimuove l'icona dal tray.",
             TextButton("Esci", () => _app.ExitAll())));
+
+        var closed = WidgetConfig.ClosedInstances();
+        if (closed.Count > 0)
+        {
+            SubTitle("Widget chiusi");
+            foreach (var id in closed)
+            {
+                string widgetId = id;
+                _content.Children.Add(Card("\uE7E8", $"Widget \u201C{widgetId}\u201D",
+                    "Configurazione salvata: si riapre con posizione, dimensioni e layout originali.",
+                    TextButton("Riapri", () =>
+                    {
+                        _app.ReopenWidget(widgetId);
+                        _page = _app.Widgets.Count + 1;   // resta sulla pagina delle impostazioni
+                        Rebuild();
+                    })));
+            }
+        }
 
         SubTitle("Informazioni");
         _content.Children.Add(Card("\uE946", "Cartella impostazioni", WidgetConfig.Dir,
@@ -436,10 +459,10 @@ sealed class ControlHub : Window
             TextButton("Porta davanti", () => { w.Show(); w.Activate(); })));
         _content.Children.Add(Card("\uE7C4", "Adatta l'altezza al contenuto", "Ridimensiona la finestra per contenere tutte le sezioni.",
             TextButton("Adatta", () => { w.FitHeightNow(); })));
-        _content.Children.Add(Card("\uE74D", "Chiudi questo widget", "La configurazione resta salvata.",
+        _content.Children.Add(Card("\uE74D", "Chiudi questo widget", "La configurazione resta salvata e si pu\u00F2 riaprire da Impostazioni app.",
             TextButton("Chiudi", () =>
             {
-                w.Close();
+                w.RequestClose();
                 Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(Rebuild));
             })));
 
@@ -517,7 +540,7 @@ sealed class ControlHub : Window
         _content.Children.Add(Card("\uE8F4", "HUD: clic attraverso", "Il widget non riceve più i clic (Ctrl+Alt+H per uscire).",
             Switch(() => c.ClickThrough, v => { c.ClickThrough = v; w.SetClickThrough(v); Apply(w); })));
         _content.Children.Add(Card("\uE950", "Rendering CPU", "Soluzione se compare l'overlay FPS di NVIDIA.",
-            Switch(() => c.SoftwareRender, v => { c.SoftwareRender = v; Apply(w); _app.ApplyRenderMode(); })));
+            Switch(() => c.SoftwareRender, v => { c.SoftwareRender = v; Apply(w); _app.ApplyRenderMode(v); })));
         _content.Children.Add(Card("\uE7F4", "Monitor", "Su quale schermo posizionarlo.",
             MonitorButtons(w)));
     }
@@ -808,11 +831,12 @@ sealed class ControlHub : Window
     {
         var combo = new ComboBox { Style = (Style)Resources["HubCombo"], MinWidth = 170 };
         for (int i = 0; i < values.Length; i++) combo.Items.Add(new ComboBoxItem { Content = names[i], Tag = values[i] });
+        string current = get();
         combo.SelectionChanged += (_, _) =>
         {
-            if (combo.SelectedItem is ComboBoxItem item && item.Tag is string v) set(v);
+            // la selezione iniziale non deve far ricostruire il widget (una volta per combo)
+            if (combo.SelectedItem is ComboBoxItem item && item.Tag is string v && v != current) set(v);
         };
-        string current = get();
         int index = Array.IndexOf(values, current);
         combo.SelectedIndex = index >= 0 ? index : 0;
         return combo;

@@ -521,32 +521,43 @@ internal sealed class GpuSampler : IDisposable
 
     public bool Open(int index = 0)
     {
-        if (!_booted) { if (Init() != 0) return false; _booted = true; }
-        if (GetCount(out uint n) != 0) return false;
-        DeviceCount = (int)n;
-        if (index >= n) return false;
-        if (GetHandle((uint)index, out _dev) != 0) return false;
+        // nvml.dll arriva col driver NVIDIA: su macchine AMD/Intel la DllImport lancia
+        // DllNotFoundException (o EntryPointNotFoundException con driver vecchi) e senza
+        // questo catch l'app non partiva affatto. La sezione GPU resta "n/d".
+        try
+        {
+            if (!_booted) { if (Init() != 0) return false; _booted = true; }
+            if (GetCount(out uint n) != 0) return false;
+            DeviceCount = (int)n;
+            if (index >= n) return false;
+            if (GetHandle((uint)index, out _dev) != 0) return false;
 
-        var buf = new byte[96];
-        if (GetName(_dev, buf, 96u) == 0)
-            Name = System.Text.Encoding.ASCII.GetString(buf).TrimEnd('\0');
-        if (GetPowerLimit(_dev, out uint lim) == 0) WattsLimit = lim / 1000.0;
-        Available = true;
-        return true;
+            var buf = new byte[96];
+            if (GetName(_dev, buf, 96u) == 0)
+                Name = System.Text.Encoding.ASCII.GetString(buf).TrimEnd('\0');
+            if (GetPowerLimit(_dev, out uint lim) == 0) WattsLimit = lim / 1000.0;
+            Available = true;
+            return true;
+        }
+        catch { return false; }
     }
 
     public void Sample()
     {
         if (!Available) return;
-        if (GetUtil(_dev, out var u) == 0) { Util = u.Gpu; MemUtil = u.Memory; }
-        if (GetMem(_dev, out var m) == 0)
+        try
         {
-            VramUsedGb = m.Used / 1073741824.0;
-            VramTotalGb = m.Total / 1073741824.0;
+            if (GetUtil(_dev, out var u) == 0) { Util = u.Gpu; MemUtil = u.Memory; }
+            if (GetMem(_dev, out var m) == 0)
+            {
+                VramUsedGb = m.Used / 1073741824.0;
+                VramTotalGb = m.Total / 1073741824.0;
+            }
+            if (GetPower(_dev, out uint mw) == 0) Watts = mw / 1000.0;
+            if (GetTemp(_dev, 0, out uint t) == 0) TempC = t;
+            if (GetClock(_dev, 0, out uint c) == 0) ClockMhz = c;
         }
-        if (GetPower(_dev, out uint mw) == 0) Watts = mw / 1000.0;
-        if (GetTemp(_dev, 0, out uint t) == 0) TempC = t;
-        if (GetClock(_dev, 0, out uint c) == 0) ClockMhz = c;
+        catch { Available = false; }
     }
 
     public void Dispose() { if (_booted) { try { Shutdown(); } catch { } _booted = false; } }
@@ -578,11 +589,14 @@ internal static class SensorHub
         Cpu.LoadStatic();
         Ram.LoadStatic();
         Ram.Sample();
-            Disk.Open();
+        Disk.Open();
         Gpu.Open(0);
         StartAiRefresh();
         Sample();
-        SetInterval("__start", intervalSeconds);
+
+        // i widget hanno già registrato il loro intervallo nel costruttore; il parametro
+        // copre solo l'avvio senza finestre (nessuna richiesta registrata)
+        if (Requested.Count == 0) StartTimer(intervalSeconds);
     }
 
     /// <summary>Le API AI si aggiornano molto più lentamente del resto (default 15 min)
@@ -622,13 +636,18 @@ internal static class SensorHub
     public static void SetInterval(string widgetId, double seconds)
     {
         Requested[widgetId] = Math.Clamp(seconds, 0.5, 5);
-        double s = Requested.Values.Min();
+        StartTimer(Requested.Values.Min());
+    }
+
+    static void StartTimer(double seconds)
+    {
         if (_timer == null)
         {
             _timer = new DispatcherTimer();
             _timer.Tick += (_, _) => Sample();
         }
-        if (Math.Abs(_timer.Interval.TotalSeconds - s) > 0.01) _timer.Interval = TimeSpan.FromSeconds(s);
+        seconds = Math.Clamp(seconds, 0.5, 5);
+        if (Math.Abs(_timer.Interval.TotalSeconds - seconds) > 0.01) _timer.Interval = TimeSpan.FromSeconds(seconds);
         _timer.Start();
 
         if (_slow == null)
@@ -643,8 +662,10 @@ internal static class SensorHub
     public static void Forget(string widgetId)
     {
         Requested.Remove(widgetId);
-        if (_timer != null && Requested.Count > 0)
-            _timer.Interval = TimeSpan.FromSeconds(Requested.Values.Min());
+        if (_timer == null) return;
+        // nessun widget a schermo: niente campionamenti (il refresh AI ha il suo timer)
+        if (Requested.Count == 0) { _timer.Stop(); return; }
+        _timer.Interval = TimeSpan.FromSeconds(Requested.Values.Min());
     }
 
     static void Sample()

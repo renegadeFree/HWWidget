@@ -12,7 +12,8 @@ namespace HWWidget;
 /// widget (resize, layout change, theme change) never loses the graph history.</summary>
 public sealed class Series
 {
-    const int Cap = 1200;
+    public const int Capacity = 1200;
+    const int Cap = Capacity;
     readonly double[] _a = new double[Cap];
     readonly double[] _b = new double[Cap];
     int _head, _count;
@@ -93,7 +94,7 @@ public sealed class Sparkline : FrameworkElement
 
         double vmax = VMax > 0 ? VMax : AutoMax(vis);
         if (vmax <= 0) vmax = 1;
-        int start = (Series.Head - vis + 1200 * 8) % 1200;
+        int start = (Series.Head - vis + Series.Capacity * 8) % Series.Capacity;
 
         // sfumatura verso i bordi del box: il grafico arriva ai lati e si spegne dolcemente
         dc.PushOpacityMask(EdgeFade(w));
@@ -138,7 +139,7 @@ public sealed class Sparkline : FrameworkElement
         double m = 0;
         for (int i = 0; i < vis; i++)
         {
-            int idx = (Series.Head - vis + i + 1200 * 8) % 1200;
+            int idx = (Series.Head - vis + i + Series.Capacity * 8) % Series.Capacity;
             double v = Series.A(idx);
             if (!double.IsNaN(v) && v > m) m = v;
             if (Series.HasB)
@@ -158,7 +159,7 @@ public sealed class Sparkline : FrameworkElement
 
         for (int i = 0; i < vis; i++)
         {
-            double v = second ? Series.B((start + i) % 1200) : Series.A((start + i) % 1200);
+            double v = second ? Series.B((start + i) % Series.Capacity) : Series.A((start + i) % Series.Capacity);
             if (double.IsNaN(v)) v = 0;
             double y = h - Math.Min(1, v / vmax) * (h - 2) - 1;
             pts[i] = new Point(i * step, y);
@@ -202,7 +203,7 @@ public sealed class Sparkline : FrameworkElement
             : stroke;
         for (int i = 0; i < bars; i++)
         {
-            int idx = (start + (int)((double)i / bars * vis)) % 1200;
+            int idx = (start + (int)((double)i / bars * vis)) % Series.Capacity;
             double v = second ? Series.B(idx) : Series.A(idx);
             if (double.IsNaN(v)) v = 0;
             double bh = Math.Max(1, Math.Min(1, v / vmax) * (h - 2));

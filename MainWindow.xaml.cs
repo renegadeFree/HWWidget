@@ -33,6 +33,9 @@ public partial class MainWindow : Window
 
     public event Action<MainWindow>? CloseRequested;
 
+    /// <summary>Chiusura definitiva (app controller salva Closed=true e mantiene il file).</summary>
+    public void RequestClose() => CloseRequested?.Invoke(this);
+
     internal MainWindow(WidgetConfig c)
     {
         _c = c;
@@ -428,7 +431,9 @@ public partial class MainWindow : Window
             Leaf("Preset: solo rete", () => Preset(true, false, false, false, false)),
             Leaf("Preset: CPU + GPU", () => Preset(false, true, true, false, false)),
             Leaf("Preset: CPU + RAM", () => Preset(false, true, false, true, false)),
-            Leaf("Preset: GPU + RAM", () => Preset(false, false, true, true, false)));
+            Leaf("Preset: GPU + RAM", () => Preset(false, false, true, true, false)),
+            Leaf("Preset: solo AI", () => PresetAi(false)),
+            Leaf("Preset: solo DeepSeek", () => PresetAi(true)));
 
         var layout = SubWithHeader("Layout",
             Choose("Righe compatte", _c.Layout == "rows", () => SetLayout("rows")),
@@ -528,17 +533,10 @@ public partial class MainWindow : Window
 
         var sistema = SubWithHeader("Sistema",
             Toggle("Avvia con Windows", AppController.Current.StartupEnabled, v => AppController.Current.SetStartup(v)),
-            SubWithHeader("Nuovo widget",
-                Leaf("Tutto", () => AppController.Current.NewWidget(null)),
-                Leaf("Solo CPU", () => AppController.Current.NewWidget("cpu")),
-                Leaf("Solo GPU", () => AppController.Current.NewWidget("gpu")),
-                Leaf("Solo RAM", () => AppController.Current.NewWidget("ram")),
-                Leaf("Solo rete", () => AppController.Current.NewWidget("net")),
-                Leaf("CPU + GPU", () => AppController.Current.NewWidget("cpugpu")),
-                Leaf("Solo DeepSeek", () => AppController.Current.NewWidget("ds"))),
+            NewWidgetMenu(),
             Leaf("Hub di controllo…", () => AppController.Current.ShowHub()),
             Toggle("Rendering CPU (se compare l'overlay NVIDIA)", _c.SoftwareRender,
-                   v => { _c.SoftwareRender = v; Changed(); AppController.Current.ApplyRenderMode(); }),
+                   v => { _c.SoftwareRender = v; Changed(); AppController.Current.ApplyRenderMode(v); }),
             new Separator(),
             Leaf("Chiudi questo widget", () => CloseRequested?.Invoke(this)),
             Leaf("Esci da HW Widget", () => AppController.Current.ExitAll()));
@@ -550,23 +548,23 @@ public partial class MainWindow : Window
         };
     }
 
-    static readonly (string Name, string Hex)[] Swatches =
+    static MenuItem NewWidgetMenu()
     {
-        ("Blu", "#4CC2FF"),
-        ("Verde", "#5CD66E"),
-        ("Ambra", "#FFB84D"),
-        ("Rosso", "#FF5B5B"),
-        ("Viola", "#A78BFA"),
-        ("Turchese", "#4FD1C5"),
-        ("Rosa", "#FF7AC6"),
-        ("Grigio", "#B0B6BF"),
-    };
+        var menu = new MenuItem { Header = "Nuovo widget" };
+        foreach (var (key, label) in AppController.Presets)
+        {
+            var leaf = new MenuItem { Header = label };
+            leaf.Click += (_, _) => AppController.Current.NewWidget(key);
+            menu.Items.Add(leaf);
+        }
+        return menu;
+    }
 
     MenuItem ColorPicker(string element, string label)
     {
         var root = new MenuItem { Header = label };
         root.Items.Add(Swatch(element, "Automatico (per soglia)", "auto"));
-        foreach (var (name, hex) in Swatches) root.Items.Add(Swatch(element, name, hex));
+        foreach (var (name, hex) in Palette.Swatches) root.Items.Add(Swatch(element, name, hex));
         return root;
     }
 
@@ -603,6 +601,17 @@ public partial class MainWindow : Window
     void Preset(bool net, bool cpu, bool gpu, bool ram, bool disk)
     {
         _c.ShowNet = net; _c.ShowCpu = cpu; _c.ShowGpu = gpu; _c.ShowRam = ram; _c.ShowDisk = disk;
+        _c.ShowAi = _c.ShowDs = false;
+        Changed(true);
+        Height = FitHeight();
+        SavePosition();
+    }
+
+    void PresetAi(bool deepSeek)
+    {
+        _c.ShowNet = _c.ShowCpu = _c.ShowGpu = _c.ShowRam = _c.ShowDisk = false;
+        _c.ShowAi = !deepSeek;
+        _c.ShowDs = deepSeek;
         Changed(true);
         Height = FitHeight();
         SavePosition();
@@ -705,6 +714,9 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        // un debounce ancora attivo terrebbe viva la finestra chiusa dal timer del dispatcher
+        _saveDebounce.Stop();
+        _resizeDebounce.Stop();
         SavePosition();
         SensorHub.Tick -= OnTick;
         SensorHub.Forget(_c.Id);

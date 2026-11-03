@@ -13,7 +13,7 @@ e un hub di controllo in stile Impostazioni di Windows.
 |---|---|---|
 | Rete | upload / download + grafici | `GetIfTable2` (IPv4+IPv6, sceglie l'adattatore attivo) |
 | CPU | utilizzo % e frequenza | `GetSystemTimes` + WMI per il clock |
-| GPU | utilizzo, VRAM, watt, temperatura | NVML (`nvml.dll` del driver NVIDIA) |
+| GPU | utilizzo, VRAM, watt, temperatura | NVML (`nvml.dll` del driver NVIDIA; senza driver la sezione mostra `n/d` e il widget parte lo stesso) |
 | RAM | utilizzo, frequenza | `GlobalMemoryStatusEx` + SMBIOS |
 | Disco | lettura / scrittura | PDH con contatori in inglese |
 
@@ -27,6 +27,7 @@ e un hub di controllo in stile Impostazioni di Windows.
 - **Multi monitor**: posizione ricordata per monitor (device id + offset in pixel fisici).
 - **Hub di controllo**: una pagina per widget con tutte le opzioni, applicate in tempo reale,
   più inserimento manuale di numeri e colori e riordino delle sezioni.
+  **Widget chiusi**: la configurazione resta salvata e si riapre da *Impostazioni app → Widget chiusi*.
 - **Tray**: doppio clic = hub, clic singolo = mostra/nascondi, tasto destro = menu.
 - **Avvio con Windows**, icona dell'app e installer standalone.
 - **Sezione AI** (solo numeri, senza grafici): budget rimasto, budget consumato e token
@@ -56,6 +57,8 @@ e un hub di controllo in stile Impostazioni di Windows.
   ![Widget DeepSeek](docs/deepseek.png)
 
 - **Aggiornamento automatico** dalle release GitHub: controlla, chiede, scarica e riavvia.
+  Se la release pubblica anche `HWWidgetSetup-….exe.sha256` oppure `SHA256SUMS.txt`, l'installer
+  scaricato viene verificato prima di essere eseguito (senza hash la verifica è saltata).
   `HWWidget.exe --update-silent` fa lo stesso giro senza interfaccia (per aggiornamenti
   pianificati e per verificare una release appena pubblicata).
 
