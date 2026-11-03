@@ -21,13 +21,29 @@ static class Program
             return;
         }
 
+        // l'evento esiste anche per il secondo processo: gli permette di chiedere all'istanza
+        // già attiva di mostrare l'hub (la scorciatoia HUB altrimenti non farebbe nulla)
+        using var showHubEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\HWWidget.ShowHub");
         using var mutex = new Mutex(true, @"Local\HWWidget.SingleInstance", out bool first);
-        if (!first) return;
+        if (!first)
+        {
+            try { showHubEvent.Set(); } catch { }
+            return;
+        }
 
         // no main window: the app lives in the tray and can hold several widgets
         var app = new System.Windows.Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         var controller = new AppController();
         controller.Start();
+        var listener = new Thread(() =>
+        {
+            while (showHubEvent.WaitOne())
+            {
+                try { app.Dispatcher.BeginInvoke(new Action(controller.ShowHub)); }
+                catch { }   // dispatcher già chiuso
+            }
+        }) { IsBackground = true, Name = "HWWidget.ShowHub" };
+        listener.Start();
         if (args.Contains("--hub")) controller.ShowHub();   // shortcut/HUB diretto
         app.Run();
         controller.Dispose();

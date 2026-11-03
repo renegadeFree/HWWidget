@@ -180,7 +180,8 @@ public partial class MainWindow : Window
 
         Host.Content = _view.Root;
         Loc.Apply(this);
-        _view.Bind(SensorHub.Current);
+        // rebuild: aggiorna testi e colori, non aggiunge campioni alle serie dei grafici
+        _view.Bind(SensorHub.Current, pushSamples: false);
     }
 
     static double Measured(WidgetView v, double width)
@@ -633,7 +634,7 @@ public partial class MainWindow : Window
                 Leaf("Piccolo", () => SetSize(240)),
                 Leaf("Medio", () => SetSize(360)),
                 Leaf("Grande", () => SetSize(480)),
-                Leaf("Adatta altezza", () => { Height = FitHeight(); SavePosition(); })));
+                Leaf("Adatta altezza", () => FitHeightNow())));
 
         var colori = SubWithHeader("Colori dei misuratori",
             ColorPicker("cpu", "CPU"),
@@ -797,11 +798,7 @@ public partial class MainWindow : Window
         Changed(true);
     }
 
-    void SetSize(double width)
-    {
-        Width = width;
-        SavePosition();
-    }
+    void SetSize(double width) => SetWindowSize(width);
 
     void SetInterval(double seconds)
     {
@@ -834,7 +831,31 @@ public partial class MainWindow : Window
     public void FitHeightNow()
     {
         Height = FitHeight();
+        ClampToScreen();
         SavePosition();
+    }
+
+    /// <summary>Ridimensiona e riporta la finestra dentro l'area di lavoro del monitor:
+    /// una misura nuova non deve spingere il widget fuori dallo schermo.</summary>
+    public void SetWindowSize(double? width = null, double? height = null)
+    {
+        if (width.HasValue) Width = Math.Max(MinWidth, width.Value);
+        if (height.HasValue) Height = Math.Max(MinHeight, height.Value);
+        UpdateLayout();
+        ClampToScreen();
+        DebouncedSave();
+    }
+
+    void ClampToScreen()
+    {
+        if (_hwnd == IntPtr.Zero || !Native.GetWindowRect(_hwnd, out var r)) return;
+        var wa = WF.Screen.FromHandle(_hwnd).WorkingArea;
+        int w = r.R - r.L, h = r.B - r.T;
+        int x = Math.Clamp(r.L, wa.X, Math.Max(wa.X, wa.Right - w));
+        int y = Math.Clamp(r.T, wa.Y, Math.Max(wa.Y, wa.Bottom - h));
+        if (x == r.L && y == r.T) return;
+        Native.SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0,
+            Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
     }
 
     protected override void OnClosed(EventArgs e)

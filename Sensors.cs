@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Management;
 using System.Net.NetworkInformation;
@@ -45,12 +46,6 @@ static class Native
     [DllImport("dwmapi.dll")]
     public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
 
-    [DllImport("dwmapi.dll")]
-    public static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS m);
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MARGINS { public int l, r, t, b; }
-
     [DllImport("user32.dll", SetLastError = true)]
     public static extern int GetWindowLong(IntPtr hwnd, int index);
 
@@ -60,7 +55,6 @@ static class Native
     public const int GWL_EXSTYLE = -20;
     public const int WS_EX_TRANSPARENT = 0x20;
     public const int WS_EX_TOOLWINDOW = 0x80;
-    public const int WS_EX_LAYERED = 0x80000;
     public const int WS_EX_NOACTIVATE = 0x08000000;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -228,10 +222,6 @@ static class Native
         return list;
     }
 
-    public const int GWL_STYLE = -16;
-    public const int WS_THICKFRAME = 0x40000;
-    public const int WS_MAXIMIZEBOX = 0x10000;
-    public const int WS_MINIMIZEBOX = 0x20000;
     public const uint SWP_NOZORDER = 0x0004;
     public const uint SWP_NOACTIVATE = 0x0010;
     public const uint SWP_NOSIZE = 0x0001;
@@ -290,6 +280,7 @@ internal sealed class NetSampler
     {
         public ulong Luid; public string Alias = ""; public string Desc = "";
         public double Down, Up, Link;
+        public bool Physical;
         public double Total => Down + Up;
     }
 
@@ -302,12 +293,11 @@ internal sealed class NetSampler
     public double LinkBps { get; private set; }
     public string AdapterName { get; private set; } = "n/d";
 
-    public void RefreshAdapters() { }   // adapters are re-read every sample
-
-    /// <summary>Raw per-interface counters: (luid, alias, description, rxBytes, txBytes, linkBps).</summary>
-    internal static List<(ulong luid, string alias, string desc, ulong rx, ulong tx, ulong link)> Read()
+    /// <summary>Raw per-interface counters:
+    /// (luid, alias, description, rxBytes, txBytes, linkBps, physical).</summary>
+    internal static List<(ulong luid, string alias, string desc, ulong rx, ulong tx, ulong link, bool physical)> Read()
     {
-        var list = new List<(ulong, string, string, ulong, ulong, ulong)>();
+        var list = new List<(ulong, string, string, ulong, ulong, ulong, bool)>();
         if (GetIfTable2(out IntPtr table) != 0) return list;
         try
         {
@@ -326,7 +316,8 @@ internal sealed class NetSampler
                 if (IsFilterDriver(alias) || IsFilterDriver(desc)) continue;
                 list.Add(((ulong)Marshal.ReadInt64(row + OffLuid), alias, desc,
                           (ulong)Marshal.ReadInt64(row + OffIn), (ulong)Marshal.ReadInt64(row + OffOut),
-                          (ulong)Marshal.ReadInt64(row + OffLink)));
+                          (ulong)Marshal.ReadInt64(row + OffLink),
+                          !IsVirtual(alias) && !IsVirtual(desc)));
             }
         }
         finally { FreeMibTable(table); }
@@ -339,6 +330,23 @@ internal sealed class NetSampler
         s.Contains("WFP", StringComparison.OrdinalIgnoreCase) ||
         s.Contains("LightWeight Filter", StringComparison.OrdinalIgnoreCase) ||
         s.Contains("QoS Packet Scheduler", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Hyper-V, VPN e adattatori virtuali specchiano il traffico della NIC vera:
+    /// usarli come "adattatore attivo" mostra un nome incomprensibile e, a pari traffico,
+    /// può vincere quello col link dichiarato più alto.</summary>
+    static bool IsVirtual(string s) =>
+        s.Contains("Hyper-V", StringComparison.OrdinalIgnoreCase) ||
+        s.Contains("Virtual", StringComparison.OrdinalIgnoreCase) ||
+        s.Contains("VMware", StringComparison.OrdinalIgnoreCase) ||
+        s.Contains("VirtualBox", StringComparison.OrdinalIgnoreCase) ||
+        s.Contains("Npcap", StringComparison.OrdinalIgnoreCase) ||
+        s.Contains("Loopback", StringComparison.OrdinalIgnoreCase) ||
+        s.Contains("Tailscale", StringComparison.OrdinalIgnoreCase) ||
+        s.Contains("WireGuard", StringComparison.OrdinalIgnoreCase) ||
+        s.Contains("ZeroTier", StringComparison.OrdinalIgnoreCase) ||
+        s.Contains("Wintun", StringComparison.OrdinalIgnoreCase) ||
+        s.Contains("TAP-", StringComparison.OrdinalIgnoreCase) ||
+        s.Contains("VPN", StringComparison.OrdinalIgnoreCase);
 
     public void Sample()
     {
@@ -359,16 +367,24 @@ internal sealed class NetSampler
                 up = Math.Max(0, (double)(r.tx - p.tx)) / dt;
             }
             _prev[r.luid] = (r.rx, r.tx);
-            rates.Add(new Rate { Luid = r.luid, Alias = r.alias, Desc = r.desc, Down = down, Up = up, Link = r.link });
+            rates.Add(new Rate
+            {
+                Luid = r.luid, Alias = r.alias, Desc = r.desc,
+                Down = down, Up = up, Link = r.link, Physical = r.physical,
+            });
         }
         if (rates.Count == 0) { DownBps = UpBps = LinkBps = 0; AdapterName = "n/d"; return; }
 
-        var best = rates.MaxBy(r => r.Total)!;
-        if (best.Total == 0) best = rates.MaxBy(r => r.Link)!;   // idle: prefer the fastest link
+        // prima le NIC fisiche; gli adattatori virtuali solo se non ce ne sono (macchine virtuali)
+        var candidates = rates.Where(r => r.Physical).ToList();
+        if (candidates.Count == 0) candidates = rates;
+
+        var best = candidates.MaxBy(r => r.Total)!;
+        if (best.Total == 0) best = candidates.MaxBy(r => r.Link)!;   // idle: prefer the fastest link
 
         // sticky: don't hop between adapters for trickle traffic
         if (_chosen != 0 && best.Luid != _chosen && best.Total < 256 * 1024)
-            best = rates.Find(r => r.Luid == _chosen) ?? best;
+            best = candidates.Find(r => r.Luid == _chosen) ?? best;
 
         _chosen = best.Luid;
         DownBps = best.Down;
@@ -388,7 +404,6 @@ internal sealed class CpuSampler
     public string Name { get; private set; } = "CPU";
     public uint BaseMhz { get; private set; }
     public uint CurrentMhz { get; private set; }
-    public string? FreqNote { get; private set; }
 
     public void Prime() { _primed = Native.CpuTimes(out _idle, out _kernel, out _user); }
 
@@ -406,7 +421,7 @@ internal sealed class CpuSampler
     }
 
     /// <summary>Static info + clock. Win32_Processor.CurrentClockSpeed is live on most Intel parts,
-    /// static on AMD (no user-mode source exists there) — see FreqNote.</summary>
+    /// static on AMD (no user-mode source exists there).</summary>
     public void LoadStatic()
     {
         try
@@ -423,7 +438,6 @@ internal sealed class CpuSampler
         }
         catch { }
         if (BaseMhz == 0) { BaseMhz = 1000; CurrentMhz = 1000; }
-        FreqNote = CurrentMhz >= BaseMhz ? "base" : null;
     }
 
     public void RefreshClock()
@@ -435,7 +449,7 @@ internal sealed class CpuSampler
             foreach (ManagementObject mo in searcher.Get())
             {
                 uint mhz = Convert.ToUInt32(mo["CurrentClockSpeed"] ?? 0u);
-                if (mhz > 0) { CurrentMhz = mhz; FreqNote = mhz >= BaseMhz ? "base" : null; }
+                if (mhz > 0) CurrentMhz = mhz;   // uint: scrittura atomica, il sample legge sul thread UI
                 break;
             }
         }
@@ -507,7 +521,11 @@ internal sealed class DiskSampler
     public double ReadBps { get; private set; }
     public double WriteBps { get; private set; }
     public string Name { get; private set; } = "_Total";
-    public List<(string Name, double TotalGb, double FreeGb)> Volumes { get; } = new();
+
+    // la lista viene sostituita, mai modificata sul posto: il sample può leggerla dal
+    // thread UI mentre l'aggiornamento gira in background
+    List<(string Name, double TotalGb, double FreeGb)> _volumes = new();
+    public IReadOnlyList<(string Name, double TotalGb, double FreeGb)> Volumes => _volumes;
 
     public void Open()
     {
@@ -537,25 +555,22 @@ internal sealed class DiskSampler
         catch { }
     }
 
-    /// <summary>Capacità dei volumi locali (C:, D:, …), non dei singoli dischi fisici.</summary>
+    /// <summary>Capacità dei volumi locali (C:, D:, …), non dei singoli dischi fisici.
+    /// DriveInfo invece di WMI: niente query costosa ogni 30 secondi.</summary>
     public void LoadStatic()
     {
         try
         {
             var rows = new List<(string Name, double TotalGb, double FreeGb)>();
-            using var searcher = new ManagementObjectSearcher(
-                "SELECT DeviceID, Size, FreeSpace FROM Win32_LogicalDisk WHERE DriveType=3");
-            foreach (ManagementObject mo in searcher.Get())
+            foreach (var d in DriveInfo.GetDrives())
             {
-                string name = (mo["DeviceID"] as string) ?? "";
-                if (name.Length == 0) continue;
-                double total = Convert.ToUInt64(mo["Size"] ?? 0UL) / 1073741824.0;
-                double free = Convert.ToUInt64(mo["FreeSpace"] ?? 0UL) / 1073741824.0;
-                if (total > 0) rows.Add((name, total, free));
+                if (!d.IsReady || d.DriveType != DriveType.Fixed) continue;
+                double total = d.TotalSize / 1073741824.0;
+                double free = d.AvailableFreeSpace / 1073741824.0;
+                if (total > 0) rows.Add((d.Name.TrimEnd('\\'), total, free));
             }
             rows.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
-            Volumes.Clear();
-            Volumes.AddRange(rows);
+            _volumes = rows;
         }
         catch { }
     }
@@ -908,9 +923,10 @@ internal static class SensorHub
 
         if (_slow == null)
         {
-            // WMI clock read is the most expensive source and the value is static on most AMD parts
+            // letture rare e potenzialmente lente (WMI per il clock, DriveInfo per i volumi):
+            // fuori dal thread UI, che altrimenti si blocca ogni 30 secondi
             _slow = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
-            _slow.Tick += (_, _) => { Cpu.RefreshClock(); Disk.LoadStatic(); };
+            _slow.Tick += (_, _) => _ = Task.Run(() => { Cpu.RefreshClock(); Disk.LoadStatic(); });
             _slow.Start();
         }
     }

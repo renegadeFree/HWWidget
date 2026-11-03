@@ -27,10 +27,11 @@ sealed class DeepSeekLogin : Window
     public DeepSeekLogin()
     {
         Title = $"DeepSeek — {Loc.T("Token di utilizzo")}";
-        Width = 1020;
-        Height = 740;
-        MinWidth = 620;
-        MinHeight = 420;
+        // una finestra più grande dello schermo lascerebbe il login fuori dall'area visibile
+        Width = Math.Min(1020, SystemParameters.WorkArea.Width - 40);
+        Height = Math.Min(740, SystemParameters.WorkArea.Height - 40);
+        MinWidth = Math.Min(620, Width);
+        MinHeight = Math.Min(420, Height);
         WindowStyle = WindowStyle.None;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI");
@@ -224,6 +225,9 @@ sealed class DeepSeekLogin : Window
   if (window.__dsHook) return; window.__dsHook = true;
   var prefix = 'DSM_USAGE_TOKEN:';
   function grab(t) {
+    // solo sul dominio DeepSeek: navigando altrove nella stessa WebView l'hook non deve
+    // catturare token di altri siti
+    if (!/(^|\.)deepseek\.com$/i.test(location.hostname)) return;
     if (!t || t.length < 40) return;
     try { document.title = prefix + t; } catch (e) {}
     try { window.chrome.webview.postMessage(prefix + t); } catch (e) {}

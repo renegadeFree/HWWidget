@@ -9,7 +9,7 @@ e un hub di controllo in stile Impostazioni di Windows.
 
 ## Cosa mostra
 
-| Elemento | Dati | Sorgente (nessun driver, nessun admin) |
+| Elemento | Dati | Sorgente (nessun admin; per la GPU serve il driver NVIDIA) |
 |---|---|---|
 | Rete | upload / download + grafici | `GetIfTable2` (IPv4+IPv6, sceglie l'adattatore attivo) |
 | CPU | utilizzo % e frequenza | `GetSystemTimes` + WMI per il clock |
@@ -23,8 +23,15 @@ e un hub di controllo in stile Impostazioni di Windows.
 - **Grafici**: stile area/linea/barre/scalini, durata 30 s → 10 min, aggiornamento 0,5/1/2 s.
   Arrivano ai bordi del box (a destra, a sinistra e in basso dove serve) e si spengono con
   una leggera sfumatura; il pieno sotto la linea sfuma verso il basso.
+- **Dettagli a comparsa**: l'icona accanto a CPU, GPU, RAM, Disco e Rete apre i valori per
+  core, gli engine della GPU, le capacità dei volumi e i dati dell'adattatore attivo.
 - **Materiale**: acrylic sfocato (sempre sfocato), Mica, Mica Alt, Acrylic DWM o pannello pieno.
 - **Multi monitor**: posizione ricordata per monitor (device id + offset in pixel fisici).
+- **Desktop**: *Tieni sul desktop* evita che Win+D nasconda il widget.
+- **Adattamento**: il contenuto si scala per entrare nella finestra e lo spazio libero lo
+  prendono i grafici; cresce solo quando una modifica dall'hub lo rende più alto.
+- **Lingue**: interfaccia in 14 lingue (italiano, inglese, russo, cinese, coreano, giapponese,
+  hindi, tedesco, spagnolo, francese, greco, portoghese, arabo).
 - **Hub di controllo**: una pagina per widget con tutte le opzioni, applicate in tempo reale,
   più inserimento manuale di numeri e colori e riordino delle sezioni.
   **Widget chiusi**: la configurazione resta salvata e si riapre da *Impostazioni app → Widget chiusi*.

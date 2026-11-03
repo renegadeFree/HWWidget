@@ -79,10 +79,18 @@ sealed class AiKeys
                 string json = Secret.Unprotect(System.IO.File.ReadAllBytes(path));
                 if (!json.Contains("\"GitHub\"", StringComparison.Ordinal)) continue;
                 var clean = JsonSerializer.Deserialize<AiKeys>(json) ?? new AiKeys();
-                System.IO.File.WriteAllBytes(path, Secret.Protect(JsonSerializer.Serialize(clean)));
+                WriteAtomic(path, Secret.Protect(JsonSerializer.Serialize(clean)));
             }
             catch { }
         }
+    }
+
+    static void WriteAtomic(string path, byte[] data)
+    {
+        string tmp = path + ".tmp";
+        System.IO.File.WriteAllBytes(tmp, data);
+        if (System.IO.File.Exists(path)) System.IO.File.Replace(tmp, path, null, true);
+        else System.IO.File.Move(tmp, path);
     }
 
     /// <summary>Scrittura atomica: le chiavi non si perdono se l'app viene chiusa a metà.</summary>

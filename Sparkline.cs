@@ -141,8 +141,6 @@ public sealed class Sparkline : FrameworkElement
         return g;
     }
 
-    static double San(double v) => double.IsNaN(v) || v < 0 ? 0 : v;
-
     double AutoMax(int vis)
     {
         double m = 0;

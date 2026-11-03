@@ -348,14 +348,22 @@ static class SelfTest
 
             // autostart: same registry value the menus write
             const string runKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+            bool wrote = false, restored = false;
             using (var k = Registry.CurrentUser.OpenSubKey(runKey, true))
             {
                 var before = k?.GetValue("HWWidget");
-                k?.SetValue("HWWidget", "\"C:\\percorso\\di\\prova\\HWWidget.exe\"");
-                bool wrote = k?.GetValue("HWWidget") != null;
-                if (before == null) k?.DeleteValue("HWWidget", false);
-                else k?.SetValue("HWWidget", before);
-                bool restored = (k?.GetValue("HWWidget")?.ToString() ?? "") == (before?.ToString() ?? "");
+                try
+                {
+                    k?.SetValue("HWWidget", "\"C:\\percorso\\di\\prova\\HWWidget.exe\"");
+                    wrote = k?.GetValue("HWWidget") != null;
+                }
+                finally
+                {
+                    // il valore vero va rimesso anche se il test fallisce a metà
+                    if (before == null) k?.DeleteValue("HWWidget", false);
+                    else k?.SetValue("HWWidget", before);
+                }
+                restored = (k?.GetValue("HWWidget")?.ToString() ?? "") == (before?.ToString() ?? "");
                 Say("autostart", $"scrittura={wrote} ripristino={restored}");
                 Check(wrote, "chiave di avvio automatico non scrivibile");
                 Check(restored, "ripristino della chiave di avvio fallito");

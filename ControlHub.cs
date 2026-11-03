@@ -56,10 +56,11 @@ sealed class ControlHub : Window
     {
         _app = app;
         Title = "Hub di controllo — HW Widget";
-        Width = 980;
-        Height = 720;
-        MinWidth = 760;
-        MinHeight = 480;
+        // misura fissa ma mai più grande dello schermo (laptop piccoli, scaling alto)
+        Width = Math.Min(980, SystemParameters.WorkArea.Width - 40);
+        Height = Math.Min(720, SystemParameters.WorkArea.Height - 40);
+        MinWidth = Math.Min(760, Width);
+        MinHeight = Math.Min(480, Height);
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -518,9 +519,9 @@ sealed class ControlHub : Window
         _content.Children.Add(Card("\uE7C4", "Altezza elementi", "Spazio verticale delle righe.",
             Slider(0.6, 3, 0.05, () => c.RowScale, v => { c.RowScale = v; Apply(w); })));
         _content.Children.Add(Card("\uE7C4", "Larghezza finestra", "In pixel.",
-            Slider(180, 1200, 10, () => w.Width, v => w.Width = v)));
+            Slider(180, 1200, 10, () => w.Width, v => w.SetWindowSize(width: v))));
         _content.Children.Add(Card("\uE7C4", "Altezza finestra", "In pixel.",
-            Slider(120, 1400, 10, () => w.Height, v => w.Height = v)));
+            Slider(120, 1400, 10, () => w.Height, v => w.SetWindowSize(height: v))));
         _content.Children.Add(Card("\uE790", "Opacità pannello", "Da trasparente a pannello pieno.",
             Slider(0, 1, 0.05, () => c.PanelOpacity, v => { c.PanelOpacity = v; Apply(w); })));
 
@@ -548,7 +549,7 @@ sealed class ControlHub : Window
         SubTitle("Comportamento");
         _content.Children.Add(Card("\uE840", "Sempre in primo piano", "Resta sopra le altre finestre.",
             Switch(() => c.Topmost, v => { c.Topmost = v; Apply(w); })));
-        _content.Children.Add(Card("\uE8A7", "Tieni sul desktop", "Resta visibile anche quando premi Win+D.",
+        _content.Children.Add(Card("\uE8A7", "Tieni sul desktop", "Resta visibile anche quando premi Win+D. Se Explorer si riavvia, riapri il widget.",
             Switch(() => c.KeepOnDesktop, v => { c.KeepOnDesktop = v; Apply(w); })));
         _content.Children.Add(Card("\uE72E", "Blocca posizione", "Impedisce spostamento e ridimensionamento.",
             Switch(() => c.Locked, v => { c.Locked = v; Apply(w); })));

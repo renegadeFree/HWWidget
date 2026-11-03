@@ -57,7 +57,7 @@ internal sealed class WidgetConfig
     public List<string> Order { get; set; } = new();
 
     // look
-    public string Layout { get; set; } = "rows";      // rows | cards | tiles
+    public string Layout { get; set; } = "rows";      // rows | cards | tiles | panel | panelgraph
     public string GraphStyleName { get; set; } = "area";
     public string Theme { get; set; } = "system";     // system | dark | light
     /// <summary>blur = accent blur behind (always blurred, the DeskBox-like material) |
@@ -203,32 +203,17 @@ internal sealed class WidgetConfig
         try { System.IO.File.Delete(FileOf(Id)); } catch { }
     }
 
-    /// <summary>Existing widgets = the settings files on disk. No extra registry file needed.</summary>
+    /// <summary>Existing widgets = the settings files on disk. No extra registry file needed.
+    /// Se il file principale è perso o illeggibile vale la copia .bak.</summary>
     public static List<string> Instances()
     {
         var ids = new List<string>();
-        try
+        foreach (var id in UsedIds())
         {
-            if (!Directory.Exists(Dir)) return ids;
-            foreach (var f in Directory.GetFiles(Dir, "settings*.json"))
-            {
-                string name = Path.GetFileNameWithoutExtension(f);
-                string id = name == "settings" ? "main"
-                    : name.StartsWith("settings-", StringComparison.Ordinal) ? name["settings-".Length..] : "";
-                if (id.Length > 0 && !ids.Contains(id))
-                {
-                    try
-                    {
-                        var cfg = JsonSerializer.Deserialize<WidgetConfig>(System.IO.File.ReadAllText(f));
-                        if (cfg?.Closed == true) continue;
-                    }
-                    catch { }
-                    ids.Add(id);
-                }
-            }
-            ids.Sort(StringComparer.OrdinalIgnoreCase);
+            var cfg = Read(FileOf(id)) ?? Read(FileOf(id) + ".bak");
+            if (cfg?.Closed == true) continue;
+            ids.Add(id);
         }
-        catch { }
         return ids;
     }
 
@@ -240,9 +225,12 @@ internal sealed class WidgetConfig
         try
         {
             if (!Directory.Exists(Dir)) return ids;
-            foreach (var f in Directory.GetFiles(Dir, "settings*.json"))
+            var files = Directory.GetFiles(Dir, "settings*.json")
+                                 .Concat(Directory.GetFiles(Dir, "settings*.json.bak"));
+            foreach (var f in files)
             {
-                string name = Path.GetFileNameWithoutExtension(f);
+                string file = f.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ? f[..^4] : f;
+                string name = Path.GetFileNameWithoutExtension(file);
                 string id = name == "settings" ? "main"
                     : name.StartsWith("settings-", StringComparison.Ordinal) ? name["settings-".Length..] : "";
                 if (id.Length > 0 && !ids.Contains(id)) ids.Add(id);
@@ -261,7 +249,7 @@ internal sealed class WidgetConfig
         {
             try
             {
-                var cfg = Read(FileOf(id));
+                var cfg = Read(FileOf(id)) ?? Read(FileOf(id) + ".bak");
                 if (cfg?.Closed == true) ids.Add(id);
             }
             catch { }

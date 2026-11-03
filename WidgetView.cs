@@ -39,7 +39,7 @@ internal sealed class Metrics
     public AiSnapshot Ai = new();
 }
 
-/// <summary>Builds the widget content for the three layouts and binds a sample to it.
+/// <summary>Builds the widget content for the five layouts and binds a sample to it.
 /// All colours come from the palette, so nothing depends on the WPF defaults (that is
 /// how black-on-black text happened before).</summary>
 internal sealed class WidgetView
@@ -64,6 +64,7 @@ internal sealed class WidgetView
     /// (padding delle tessere, margini), altrimenti rimpicciolendo resterebbero fuori.</summary>
     readonly double _fit;
     int _graphs;
+    bool _pushSamples = true;
     readonly List<Action<Metrics>> _binds = new();
     readonly List<Action<Metrics>> _detailBinds = new();
     readonly double _du;
@@ -103,11 +104,23 @@ internal sealed class WidgetView
         return height + _extraGraph;
     }
 
-    public void Bind(Metrics m)
+    /// <summary>pushSamples=false per il rebuild (resize, cambio opzioni): aggiorna testi e
+    /// colori senza aggiungere campioni alle serie — il tempo non è passato e i grafici
+    /// finirebbero per mostrare dati duplicati.</summary>
+    public void Bind(Metrics m, bool pushSamples = true)
     {
-        foreach (var b in _binds) b(m);
-        foreach (var b in _detailBinds) b(m);
-        Loc.Apply(Root);
+        _pushSamples = pushSamples;
+        try
+        {
+            foreach (var b in _binds) b(m);
+            foreach (var b in _detailBinds) b(m);
+        }
+        finally { _pushSamples = true; }
+    }
+
+    void Feed(Sparkline? graph, double a, double b = double.NaN)
+    {
+        if (_pushSamples) graph?.Push(a, b);
     }
 
     public int BoundCount => _binds.Count;
@@ -398,9 +411,15 @@ internal sealed class WidgetView
         return row;
     }
 
-    /// <summary>Scrollbar sottile e arrotondata, tinta come il tema del widget.</summary>
+    /// <summary>Scrollbar sottile e arrotondata, tinta come il tema del widget. Il parse XAML
+    /// è costoso e il rebuild ne costruisce una per ogni sezione: lo stile è cacheato.</summary>
+    static Style? _scrollDark, _scrollLight;
+
     static Style ModernScrollBar(Palette p)
     {
+        var cached = p.IsLight ? _scrollLight : _scrollDark;
+        if (cached != null) return cached;
+
         string thumb = p.IsLight ? "#59000000" : "#73FFFFFF";
         string xaml = $@"
 <Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'
@@ -433,7 +452,9 @@ internal sealed class WidgetView
     </Setter.Value>
   </Setter>
 </Style>";
-        return (Style)XamlReader.Parse(xaml);
+        var style = (Style)XamlReader.Parse(xaml);
+        if (p.IsLight) _scrollLight = style; else _scrollDark = style;
+        return style;
     }
 
     static ColumnDefinition Star(double weight)
@@ -594,8 +615,8 @@ internal sealed class WidgetView
                 if (graph == null) return;
                 graph.StrokeA = primary.color;
                 graph.StrokeB = el == "net" && d.lines.Count > 1 ? d.lines[1].color : Brushes.Transparent;
-                if (el == "net") graph.Push(m.NetDown, m.NetUp);
-                else graph.Push(primary.value);
+                if (el == "net") Feed(graph, m.NetDown, m.NetUp);
+                else Feed(graph, primary.value);
             });
         }
         return stack;
@@ -661,11 +682,11 @@ internal sealed class WidgetView
                     if (el == "net" && i == 0 && d.lines.Count > 1)
                     {
                         sp.StrokeB = d.lines[1].color;
-                        sp.Push(d.lines[0].value, d.lines[1].value);
+                        Feed(sp, d.lines[0].value, d.lines[1].value);
                     }
                     else if (d.lines[i].key.Length > 0)
                     {
-                        sp.Push(d.lines[i].value);
+                        Feed(sp, d.lines[i].value);
                     }
                 }
             });
@@ -905,7 +926,6 @@ internal sealed class WidgetView
     IEnumerable<FrameworkElement> DsRows()
     {
         var accent = _c.ColorOf("ds") != "auto" ? BrushFromHex(_c.ColorOf("ds")) : (Brush)new SolidColorBrush(DsAccent);
-        var warm = new SolidColorBrush(_p.Warn);
         var rows = new List<FrameworkElement>();
 
         // ---- saldo ----
@@ -1341,7 +1361,7 @@ internal sealed class WidgetView
             if (graph != null)
             {
                 graph.StrokeA = color;
-                graph.Push(graphValue(m));
+                Feed(graph, graphValue(m));
             }
         });
         return inner;
@@ -1391,8 +1411,8 @@ internal sealed class WidgetView
         {
             valLeft.Text = left.text(m);
             valRight.Text = right.text(m);
-            graphLeft?.Push(left.value(m));
-            graphRight?.Push(right.value(m));
+            Feed(graphLeft, left.value(m));
+            Feed(graphRight, right.value(m));
         });
         return grid;
     }
@@ -1467,8 +1487,8 @@ internal sealed class WidgetView
                 graph.StrokeA = c;
                 double w = trackGrid.ActualWidth > 2 ? trackGrid.ActualWidth : 90;
                 fill.Width = Math.Max(0, Math.Min(1, d.bar)) * w;
-                if (el == "net") graph.Push(d.lines[0].value, d.lines.Count > 1 ? d.lines[1].value : double.NaN);
-                else graph.Push(d.lines[0].value);
+                if (el == "net") Feed(graph, d.lines[0].value, d.lines.Count > 1 ? d.lines[1].value : double.NaN);
+                else Feed(graph, d.lines[0].value);
             });
         }
         return root;
