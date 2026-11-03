@@ -195,20 +195,30 @@ static class AiUsage
                 // rispondeva 400 e la spesa restava silenziosamente "n/d".
                 long from = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(-30)).ToUnixTimeSeconds();
                 long to = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                using var req = new HttpRequestMessage(HttpMethod.Get,
-                    $"https://api.openai.com/v1/organization/costs?start_time={from}&end_time={to}&bucket_width=1d&limit=31");
-                req.Headers.Add("Authorization", "Bearer " + keys.OpenAi);
-                using var res = await Http.SendAsync(req);
-                string body = await res.Content.ReadAsStringAsync();
-                if (res.IsSuccessStatusCode)
+                var daily = new Dictionary<DateTime, double>();
+                bool ok = false;
+                string? page = null;
+                for (int i = 0; i < 10; i++)
                 {
-                    var daily = ParseDailyAmounts(body);
+                    string url = $"https://api.openai.com/v1/organization/costs?start_time={from}&end_time={to}&bucket_width=1d&limit=31"
+                               + (page == null ? "" : "&page=" + Uri.EscapeDataString(page));
+                    using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                    req.Headers.Add("Authorization", "Bearer " + keys.OpenAi);
+                    using var res = await Http.SendAsync(req);
+                    string body = await res.Content.ReadAsStringAsync();
+                    if (!res.IsSuccessStatusCode) { problems.Add($"OpenAI {(int)res.StatusCode}"); break; }
+                    ok = true;
+                    MergeDaily(daily, ParseDailyAmounts(body));
+                    page = NextPage(body);
+                    if (page == null) break;
+                }
+                if (ok)
+                {
                     s.OpenAiMonthValue = daily.Values.Sum();
                     s.OpenAiWeekValue = daily.Where(kv => kv.Key >= DateTime.UtcNow.Date.AddDays(-7)).Sum(kv => kv.Value);
                     s.OpenAiMonth = Money(s.OpenAiMonthValue);
                     s.OpenAiWeek = Money(s.OpenAiWeekValue);
                 }
-                else problems.Add($"OpenAI {(int)res.StatusCode}");
             }
             catch (Exception ex) { problems.Add("OpenAI: " + ex.Message); }
         }
@@ -220,21 +230,31 @@ static class AiUsage
                 // starting_at vuole una data RFC 3339, non "yyyy-MM-dd"
                 string from = DateTime.UtcNow.Date.AddDays(-30)
                     .ToString("yyyy-MM-dd'T'00:00:00'Z'", CultureInfo.InvariantCulture);
-                using var req = new HttpRequestMessage(HttpMethod.Get,
-                    $"https://api.anthropic.com/v1/organizations/cost_report?starting_at={from}&bucket_width=1d&limit=31");
-                req.Headers.Add("x-api-key", keys.Anthropic);
-                req.Headers.Add("anthropic-version", "2023-06-01");
-                using var res = await Http.SendAsync(req);
-                string body = await res.Content.ReadAsStringAsync();
-                if (res.IsSuccessStatusCode)
+                var daily = new Dictionary<DateTime, double>();
+                bool ok = false;
+                string? page = null;
+                for (int i = 0; i < 10; i++)
                 {
-                    var daily = ParseDailyAmounts(body);
+                    string url = $"https://api.anthropic.com/v1/organizations/cost_report?starting_at={from}&bucket_width=1d&limit=31"
+                               + (page == null ? "" : "&page=" + Uri.EscapeDataString(page));
+                    using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                    req.Headers.Add("x-api-key", keys.Anthropic);
+                    req.Headers.Add("anthropic-version", "2023-06-01");
+                    using var res = await Http.SendAsync(req);
+                    string body = await res.Content.ReadAsStringAsync();
+                    if (!res.IsSuccessStatusCode) { problems.Add($"Anthropic {(int)res.StatusCode}"); break; }
+                    ok = true;
+                    MergeDaily(daily, ParseDailyAmounts(body));
+                    page = NextPage(body);
+                    if (page == null) break;
+                }
+                if (ok)
+                {
                     s.AnthropicMonthValue = daily.Values.Sum();
                     s.AnthropicWeekValue = daily.Where(kv => kv.Key >= DateTime.UtcNow.Date.AddDays(-7)).Sum(kv => kv.Value);
                     s.AnthropicMonth = Money(s.AnthropicMonthValue);
                     s.AnthropicWeek = Money(s.AnthropicWeekValue);
                 }
-                else problems.Add($"Anthropic {(int)res.StatusCode}");
             }
             catch (Exception ex) { problems.Add("Anthropic: " + ex.Message); }
         }
@@ -309,6 +329,29 @@ static class AiUsage
             result[day] = result.TryGetValue(day, out var old) ? old + sum : sum;
         }
         return result;
+    }
+
+    /// <summary>Fonde i bucket di una pagina in quelli già letti.</summary>
+    static void MergeDaily(Dictionary<DateTime, double> into, Dictionary<DateTime, double> page)
+    {
+        foreach (var kv in page)
+            into[kv.Key] = into.TryGetValue(kv.Key, out double v) ? v + kv.Value : kv.Value;
+    }
+
+    /// <summary>Cursore della pagina successiva, se l'API ne annuncia un'altra.</summary>
+    static string? NextPage(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return null;
+            if (!root.TryGetProperty("has_more", out var more) || more.ValueKind != JsonValueKind.True) return null;
+            if (!root.TryGetProperty("next_page", out var next) || next.ValueKind != JsonValueKind.String) return null;
+            string? cursor = next.GetString();
+            return string.IsNullOrWhiteSpace(cursor) ? null : cursor;
+        }
+        catch { return null; }
     }
 
     static double? ToNumber(JsonElement e) => e.ValueKind switch
@@ -715,6 +758,9 @@ static class CodexLogs
 {
     static string Root => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
 
+    /// <summary>Come per i log Claude: un file viene riletto solo quando cambia.</summary>
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long length, DateTime write, double? tokens)> Cache = new();
+
     public static (double total, double week) SumTokens()
     {
         double total = 0, week = 0;
@@ -724,23 +770,28 @@ static class CodexLogs
             try
             {
                 var info = new FileInfo(file);
-                bool inWeek = info.LastWriteTime >= DateTime.Now.AddDays(-7);
-                double? sessionTotal = LastSessionTotal(file);
-                if (sessionTotal.HasValue)
+                double? sessionTotal;
+                if (Cache.TryGetValue(file, out var hit) && hit.length == info.Length && hit.write == info.LastWriteTime)
+                    sessionTotal = hit.tokens;
+                else
                 {
-                    total += sessionTotal.Value;
-                    if (inWeek) week += sessionTotal.Value;
+                    sessionTotal = LastSessionTotal(file);
+                    Cache[file] = (info.Length, info.LastWriteTime, sessionTotal);
                 }
+                if (!sessionTotal.HasValue) continue;
+                total += sessionTotal.Value;
+                if (info.LastWriteTime >= DateTime.Now.AddDays(-7)) week += sessionTotal.Value;
             }
             catch { }
         }
         return (total, week);
     }
 
-    /// <summary>Legge solo la coda del file: i log possono essere enormi.</summary>
+    /// <summary>Legge solo la coda del file (i log possono essere enormi): 2 MB bastano per
+    /// l'ultimo evento token_count cumulativo anche dopo output di grosse dimensioni.</summary>
     static double? LastSessionTotal(string file)
     {
-        const int tail = 512 * 1024;
+        const int tail = 2 * 1024 * 1024;
         using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         long start = Math.Max(0, fs.Length - tail);
         fs.Seek(start, SeekOrigin.Begin);

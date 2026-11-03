@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     Palette _p;
     readonly DispatcherTimer _saveDebounce = new();
     readonly DispatcherTimer _resizeDebounce = new();
+    readonly DispatcherTimer _desktopWatch = new() { Interval = TimeSpan.FromSeconds(3) };
     readonly Dictionary<string, Series> _series = new();
     ResourceDictionary _menuStyles;
     WidgetView _view = null!;
@@ -77,6 +78,17 @@ public partial class MainWindow : Window
             Rebuild();
         };
         _resizeDebounce.Start();
+
+        // Explorer ricrea il desktop: se la finestra è sopravvissuta con un owner vecchio,
+        // la riaggancia; se è stata distrutta, il widget va riaperto a mano.
+        _desktopWatch.Tick += (_, _) =>
+        {
+            if (!_c.KeepOnDesktop || _hwnd == IntPtr.Zero) return;
+            var shell = DesktopShell();
+            if (shell != IntPtr.Zero && Native.GetWindow(_hwnd, Native.GW_OWNER) != shell)
+                SetDesktopOwner(true);
+        };
+        _desktopWatch.Start();
 
         LocationChanged += (_, _) => DebouncedSave();
         SizeChanged += (_, _) => DebouncedSave();
@@ -689,7 +701,7 @@ public partial class MainWindow : Window
     static MenuItem NewWidgetMenu()
     {
         var menu = new MenuItem { Header = "Nuovo widget" };
-        foreach (var (key, label) in AppController.Presets)
+        foreach (var (key, label, _, _) in AppController.Presets)
         {
             var leaf = new MenuItem { Header = label };
             leaf.Click += (_, _) => AppController.Current.NewWidget(key);
@@ -862,6 +874,7 @@ public partial class MainWindow : Window
     {
         // un debounce ancora attivo terrebbe viva la finestra chiusa dal timer del dispatcher
         _saveDebounce.Stop();
+        _desktopWatch.Stop();
         SavePosition();
         _resizeDebounce.Stop();
         SensorHub.Tick -= OnTick;

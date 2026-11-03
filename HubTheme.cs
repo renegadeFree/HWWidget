@@ -29,6 +29,18 @@ static class HubTheme
   <SolidColorBrush x:Key="TrackOff" Color="#2EFFFFFF" />
   <SolidColorBrush x:Key="PopupBg" Color="#F22B2B2B" />
 
+  <!-- anello di focus per chi naviga da tastiera: i template personalizzati non ne hanno -->
+  <Style x:Key="HubFocusVisual">
+    <Setter Property="Control.Template">
+      <Setter.Value>
+        <ControlTemplate>
+          <Rectangle Margin="2" Stroke="{StaticResource Accent}" StrokeThickness="1"
+                     StrokeDashArray="3 2" SnapsToDevicePixels="True" />
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <Style x:Key="HubCard" TargetType="Border">
     <Setter Property="Background" Value="{StaticResource CardBg}" />
     <Setter Property="BorderBrush" Value="{StaticResource CardStroke}" />
@@ -38,6 +50,7 @@ static class HubTheme
   </Style>
 
   <Style x:Key="HubButton" TargetType="Button">
+    <Setter Property="FocusVisualStyle" Value="{StaticResource HubFocusVisual}" />
     <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
     <Setter Property="Background" Value="{StaticResource ControlFill}" />
     <Setter Property="BorderBrush" Value="{StaticResource ControlStroke}" />
@@ -93,6 +106,7 @@ static class HubTheme
   </Style>
 
   <Style x:Key="HubToggle" TargetType="CheckBox">
+    <Setter Property="FocusVisualStyle" Value="{StaticResource HubFocusVisual}" />
     <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
     <Setter Property="FontSize" Value="12.5" />
     <Setter Property="Cursor" Value="Hand" />
@@ -160,6 +174,7 @@ static class HubTheme
   </Style>
 
   <Style x:Key="HubSlider" TargetType="Slider">
+    <Setter Property="FocusVisualStyle" Value="{StaticResource HubFocusVisual}" />
     <Setter Property="MinHeight" Value="26" />
     <Setter Property="Template">
       <Setter.Value>
@@ -225,6 +240,7 @@ static class HubTheme
   </Style>
 
   <Style x:Key="HubCombo" TargetType="ComboBox">
+    <Setter Property="FocusVisualStyle" Value="{StaticResource HubFocusVisual}" />
     <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
     <Setter Property="ItemContainerStyle" Value="{StaticResource HubComboBoxItem}" />
     <Setter Property="Template">
@@ -325,6 +341,7 @@ static class HubTheme
   </Style>
 
   <Style x:Key="HubTextBox" TargetType="TextBox">
+    <Setter Property="FocusVisualStyle" Value="{StaticResource HubFocusVisual}" />
     <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
     <Setter Property="Background" Value="{StaticResource ControlFill}" />
     <Setter Property="BorderBrush" Value="{StaticResource CardStroke}" />
@@ -354,6 +371,7 @@ static class HubTheme
   </Style>
 
   <Style x:Key="HubPassword" TargetType="PasswordBox">
+    <Setter Property="FocusVisualStyle" Value="{StaticResource HubFocusVisual}" />
     <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
     <Setter Property="Background" Value="{StaticResource ControlFill}" />
     <Setter Property="BorderBrush" Value="{StaticResource CardStroke}" />

@@ -209,6 +209,7 @@ sealed class ControlHub : Window
     Button IconButton(string glyph, string tip, Action act)
     {
         var b = new Button { Content = glyph, ToolTip = tip, Style = (Style)Resources["HubIconButton"] };
+        System.Windows.Automation.AutomationProperties.SetName(b, tip);
         b.Click += (_, _) => act();
         return b;
     }
@@ -289,22 +290,10 @@ sealed class ControlHub : Window
     {
         PageHeader("Aggiungi widget", "Crea un nuovo pannello: puoi averne quanti vuoi, ognuno con posizione, dimensioni e contenuto propri.");
         SubTitle("Scegli il widget da creare");
-        _content.Children.Add(Card("\uE9D9", "TUTTO", "CPU, GPU, RAM, disco e rete in un unico pannello.",
-            TextButton("Crea", () => Add(null), accent: true)));
-        _content.Children.Add(Card("\uE950", "CPU", "Utilizzo e frequenza della CPU.",
-            TextButton("Crea", () => Add("cpu"))));
-        _content.Children.Add(Card("\uE7FC", "GPU", "Utilizzo, temperatura e VRAM della scheda video.",
-            TextButton("Crea", () => Add("gpu"))));
-        _content.Children.Add(Card("\uE964", "RAM", "Memoria utilizzata e frequenza.",
-            TextButton("Crea", () => Add("ram"))));
-        _content.Children.Add(Card("\uE968", "RETE", "Upload e download dell'adattatore attivo.",
-            TextButton("Crea", () => Add("net"))));
-        _content.Children.Add(Card("\uE9D9", "CPU+GPU", "Due schede con i dati principali.",
-            TextButton("Crea", () => Add("cpugpu"))));
-        _content.Children.Add(Card("\uE945", "AI", "Budget rimasto, budget consumato e token totali di DeepSeek, ChatGPT e Claude (solo numeri).",
-            TextButton("Crea", () => Add("ai"))));
-        _content.Children.Add(Card("\uE9D2", "DEEPSEEK", "Saldo, spesa di oggi e del mese, token e cache hit per modello, con grafico giornaliero.",
-            TextButton("Crea", () => Add("ds"), accent: true)));
+        // stessa lista del tray e del menu del widget: i preset non possono divergere
+        foreach (var (key, label, glyph, description) in AppController.Presets)
+            _content.Children.Add(Card(glyph, label, description,
+                TextButton("Crea", () => Add(key), accent: key is null or "ds")));
     }
 
     void BuildAppPage()

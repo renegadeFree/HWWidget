@@ -26,7 +26,7 @@ internal sealed class Metrics
     public string NetName = "";
     public double CpuUsage, CpuMhz, CpuBaseMhz;
     public string CpuName = "";
-    public List<double> CpuCores = new();
+    public List<(string Name, double Pct)> CpuCores = new();
     public bool GpuOk;
     public double GpuUtil, VramUsed, VramTotal, Watts, WattsLimit, TempC, ClockMhz;
     public string GpuName = "";
@@ -216,6 +216,7 @@ internal sealed class WidgetView
             VerticalAlignment = VerticalAlignment.Center,
             ToolTip = "Dettagli",
         };
+        System.Windows.Automation.AutomationProperties.SetName(box, "Dettagli");
         box.MouseEnter += (_, _) =>
         {
             box.Background = new SolidColorBrush(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF));
@@ -327,9 +328,9 @@ internal sealed class WidgetView
                     body.Children.Add(DetailRow("Core", "n/d"));
                     break;
                 }
-                for (int i = 0; i < m.CpuCores.Count; i++)
-                    body.Children.Add(DetailRow($"Core {i}", $"{m.CpuCores[i]:0}%",
-                                                m.CpuCores[i], new SolidColorBrush(_p.Cpu)));
+                foreach (var core in m.CpuCores)
+                    body.Children.Add(DetailRow(core.Name, $"{core.Pct:0}%",
+                                                core.Pct, new SolidColorBrush(_p.Cpu)));
                 break;
             case "gpu":
                 body.Children.Add(DetailRow("Uso", $"{m.GpuUtil:0}%", m.GpuUtil, new SolidColorBrush(_p.Gpu)));
@@ -1118,6 +1119,7 @@ internal sealed class WidgetView
             VerticalAlignment = VerticalAlignment.Center,
             ToolTip = "Aggiorna saldo, token e API",
         };
+        System.Windows.Automation.AutomationProperties.SetName(box, "Aggiorna saldo, token e API");
         box.MouseEnter += (_, _) =>
         {
             box.Background = new SolidColorBrush(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF));

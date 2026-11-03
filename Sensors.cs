@@ -64,6 +64,11 @@ static class Native
     public static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
 
     [DllImport("user32.dll")]
+    public static extern IntPtr GetWindow(IntPtr hwnd, uint cmd);
+
+    public const uint GW_OWNER = 4;
+
+    [DllImport("user32.dll")]
     public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -463,7 +468,7 @@ internal sealed class CpuCoreSampler
     IntPtr _query, _counter;
     bool _opened;
 
-    public List<double> Cores { get; } = new();
+    public List<(string Name, double Pct)> Cores { get; } = new();
 
     public void Open()
     {
@@ -491,13 +496,18 @@ internal sealed class CpuCoreSampler
             if (Native.PdhCollectQueryData(_query) != 0) return;
             var rows = Native.CounterArray(_counter)
                 .Where(x => !x.name.StartsWith("_Total", StringComparison.OrdinalIgnoreCase))
-                .Select(x => (index: CoreIndex(x.name), value: Math.Clamp(x.value, 0, 100)))
+                .Select(x => (group: GroupIndex(x.name), index: CoreIndex(x.name), value: Math.Clamp(x.value, 0, 100)))
                 .Where(x => x.index >= 0)
-                .OrderBy(x => x.index)
+                .OrderBy(x => x.group).ThenBy(x => x.index)
                 .ToList();
             if (rows.Count == 0) return;
+            // oltre 64 CPU logiche gli indici si ripetono in ogni gruppo: il nome deve
+            // riportare il gruppo, altrimenti compaiono due "Core 0"
+            int maxGroup = rows.Max(x => x.group);
             Cores.Clear();
-            Cores.AddRange(rows.Select(x => x.value));
+            Cores.AddRange(rows.Select(x => (
+                Name: maxGroup > 0 ? $"G{x.group} Core {x.index}" : $"Core {x.index}",
+                Pct: x.value)));
         }
         catch { }
     }
@@ -507,6 +517,13 @@ internal sealed class CpuCoreSampler
         int comma = instance.LastIndexOf(',');
         string tail = comma >= 0 ? instance[(comma + 1)..] : instance;
         return int.TryParse(tail, out int i) ? i : -1;
+    }
+
+    static int GroupIndex(string instance)
+    {
+        int comma = instance.LastIndexOf(',');
+        if (comma < 0) return 0;
+        return int.TryParse(instance[..comma], out int g) && g >= 0 ? g : 0;
     }
 }
 

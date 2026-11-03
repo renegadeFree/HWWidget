@@ -52,7 +52,9 @@ static class Updater
             foreach (var a in assets.EnumerateArray())
             {
                 string name = a.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-                if (!name.StartsWith("HWWidgetSetup", StringComparison.OrdinalIgnoreCase)) continue;
+                // solo l'eseguibile: anche "HWWidgetSetup.exe.sha256" inizia con lo stesso prefisso
+                if (!name.StartsWith("HWWidgetSetup", StringComparison.OrdinalIgnoreCase)
+                    || !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
                 info.AssetName = name;
                 info.AssetUrl = a.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
                 info.Size = a.TryGetProperty("size", out var s) ? s.GetInt64() : 0;

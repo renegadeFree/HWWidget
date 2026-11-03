@@ -46,7 +46,7 @@ static class SelfTest
                 ? $"lettura {disk.ReadBps / 1048576:0.00} MB/s · scrittura {disk.WriteBps / 1048576:0.00} MB/s"
                 : "contatori disco non disponibili");
             Say("cpu-core", cores.Cores.Count > 0
-                ? $"{cores.Cores.Count} core · max {cores.Cores.Max():0}%"
+                ? $"{cores.Cores.Count} core · max {cores.Cores.Max(c => c.Pct):0}% · {cores.Cores[0].Name}"
                 : "contatori per-core non disponibili");
             Say("gpu-engine", engines.Engines.Count > 0
                 ? string.Join(" · ", engines.Engines.Take(8).Select(e => $"{e.Name} {e.Pct:0}%"))
@@ -61,7 +61,7 @@ static class SelfTest
             Check(cpu.BaseMhz > 0, "clock CPU non letto");
             Check(ram.TotalGb > 1 && ram.UsedGb <= ram.TotalGb, "RAM incoerente");
             Check(net.DownBps >= 0 && net.UpBps >= 0, "throughput negativo");
-            Check(cores.Cores.All(v => v is >= 0 and <= 100), "utilizzo per-core fuori range");
+            Check(cores.Cores.All(c => c.Pct is >= 0 and <= 100), "utilizzo per-core fuori range");
             Check(engines.Engines.All(e => e.Pct is >= 0 and <= 100), "utilizzo GPU engine fuori range");
             Check(disk.Volumes.Count > 0, "capacità dei volumi non lette");
             if (disk.Available)

@@ -32,17 +32,17 @@ sealed class AppController : IDisposable
     TrayIcon? _tray;
     HwndSource? _hotkeySink;
 
-    /// <summary>Preset di creazione: unica fonte per tray, menu del widget e hub.</summary>
-    public static readonly (string? Key, string Label)[] Presets =
+    /// <summary>Preset di creazione: unica fonte per tray, menu del widget e pagina dell'hub.</summary>
+    public static readonly (string? Key, string Label, string Glyph, string Description)[] Presets =
     {
-        (null, "TUTTO"),
-        ("cpu", "CPU"),
-        ("gpu", "GPU"),
-        ("ram", "RAM"),
-        ("net", "RETE"),
-        ("cpugpu", "CPU+GPU"),
-        ("ai", "AI"),
-        ("ds", "DEEPSEEK"),
+        (null, "TUTTO", "", "CPU, GPU, RAM, disco e rete in un unico pannello."),
+        ("cpu", "CPU", "", "Utilizzo e frequenza della CPU."),
+        ("gpu", "GPU", "", "Utilizzo, temperatura e VRAM della scheda video."),
+        ("ram", "RAM", "", "Memoria utilizzata e frequenza."),
+        ("net", "RETE", "", "Upload e download dell'adattatore attivo."),
+        ("cpugpu", "CPU+GPU", "", "Due schede con i dati principali."),
+        ("ai", "AI", "", "Budget rimasto, budget consumato e token totali di DeepSeek, ChatGPT e Claude (solo numeri)."),
+        ("ds", "DEEPSEEK", "", "Saldo, spesa di oggi e del mese, token e cache hit per modello, con grafico giornaliero."),
     };
 
     public AppController() => Current = this;
@@ -93,8 +93,8 @@ sealed class AppController : IDisposable
         string id = WidgetConfig.NewId();
         var c = new WidgetConfig { Id = id };
         c.Name = "TUTTO";
-        foreach (var (key, label) in Presets)
-            if (key == preset) c.Name = label;
+        foreach (var p in Presets)
+            if (p.Key == preset) c.Name = p.Label;
         switch (preset)
         {
             case "cpu": c.ShowNet = false; c.ShowGpu = false; c.ShowRam = false; c.Layout = "tiles"; break;
@@ -358,7 +358,7 @@ sealed class TrayIcon : IDisposable
         }
 
         var nuovo = new MenuItem { Header = "Nuovo widget" };
-        foreach (var (key, label) in AppController.Presets)
+        foreach (var (key, label, _, _) in AppController.Presets)
             nuovo.Items.Add(Leaf(label, () => _app.NewWidget(key)));
 
         var startup = new MenuItem { Header = "Avvia con Windows", IsCheckable = true, IsChecked = _app.StartupEnabled };
