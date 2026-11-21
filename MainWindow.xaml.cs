@@ -38,6 +38,9 @@ public partial class MainWindow : Window
     IntPtr _hwnd;
     HwndSource? _src;
     DateTime _lastUi = DateTime.MinValue;
+    /// <summary>La posizione salvata è già stata applicata: prima di allora nessun
+    /// salvataggio automatico deve scrivere il posto di default dell'avvio.</summary>
+    bool _restored;
 
     public event Action<MainWindow>? CloseRequested;
 
@@ -92,7 +95,6 @@ public partial class MainWindow : Window
 
         LocationChanged += (_, _) => DebouncedSave();
         SizeChanged += (_, _) => DebouncedSave();
-        Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(RestorePosition));
         Deactivated += (_, _) => ApplyBackdrop();
 
         SensorHub.Tick += OnTick;
@@ -108,6 +110,10 @@ public partial class MainWindow : Window
         _src?.AddHook(WndProc);
         // WPF otherwise paints its composition target opaque and the DWM backdrop never shows
         if (_src?.CompositionTarget != null) _src.CompositionTarget.BackgroundColor = Colors.Transparent;
+
+        // Prima che la finestra sia visibile: così non compare mai nel posto di default
+        // e il salvataggio automatico non può registrare quel posto al posto di quello vero.
+        RestorePosition();
 
         // no WS_THICKFRAME on purpose: with it Windows draws a thin accent-coloured frame
         // line around the widget. Resizing is implemented by hand below.
@@ -278,6 +284,7 @@ public partial class MainWindow : Window
     void RestorePosition()
     {
         if (_hwnd == IntPtr.Zero) return;
+        _restored = true;
         var screens = WF.Screen.AllScreens;
 
         if (!_c.HasPos)
@@ -300,7 +307,10 @@ public partial class MainWindow : Window
         UpdateLayout();
 
         double dpi = Math.Max(1, Native.GetDpiForWindow(_hwnd) / 96.0);
-        int pw = (int)Math.Ceiling(ActualWidth * dpi), ph = (int)Math.Ceiling(ActualHeight * dpi);
+        // alla SourceInitialized il layout può non aver ancora misurato la finestra
+        double wDip = ActualWidth > 10 ? ActualWidth : Width;
+        double hDip = ActualHeight > 10 ? ActualHeight : Height;
+        int pw = (int)Math.Ceiling(wDip * dpi), ph = (int)Math.Ceiling(hDip * dpi);
         int x = (int)Math.Clamp(wa2.X + _c.OffX, wa2.X, Math.Max(wa2.X, wa2.X + wa2.Width - pw));
         int y = (int)Math.Clamp(wa2.Y + _c.OffY, wa2.Y, Math.Max(wa2.Y, wa2.Y + wa2.Height - ph));
         Native.SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0,
@@ -317,7 +327,7 @@ public partial class MainWindow : Window
 
     void SavePosition()
     {
-        if (_hwnd == IntPtr.Zero) return;
+        if (_hwnd == IntPtr.Zero || !_restored) return;
         if (!Native.GetWindowRect(_hwnd, out var r)) return;
         var scr = WF.Screen.FromHandle(_hwnd);
         _c.Monitor = scr.DeviceName;

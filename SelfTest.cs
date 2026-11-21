@@ -679,8 +679,13 @@ static class SelfTest
 
             var again = new MainWindow(WidgetConfig.Load(id));
             again.Show();
-            Pump();
             var hwnd2 = new System.Windows.Interop.WindowInteropHelper(again).Handle;
+            // subito dopo Show (senza far girare la coda): se il ripristino arrivasse dopo
+            // il primo salvataggio automatico la finestra sarebbe ancora nel posto di default
+            Check(Native.GetWindowRect(hwnd2, out var early), "GetWindowRect fallito appena aperto");
+            Check(Math.Abs(early.L - before.L) <= 2 && Math.Abs(early.T - before.T) <= 2,
+                  $"posizione applicata solo dopo l'avvio: Δ{early.L - before.L},{early.T - before.T} px");
+            Pump();
             Check(Native.GetWindowRect(hwnd2, out var after), "GetWindowRect fallito al secondo giro");
             double dpi = Native.GetDpiForWindow(hwnd2) / 96.0;
             again.Close();
