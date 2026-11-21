@@ -251,6 +251,16 @@ static class SelfTest
             Check(ds.Days.Count == 7 && Math.Abs(ds.Days[1].Hit - 2_000_000) < 1, "token per giorno DeepSeek");
             Check(Math.Abs(ds.Days[0].Cost - 1.50) < 0.001, $"costo del giorno DeepSeek {ds.Days[0].Cost}");
             Check(ds.Currency == "CNY" && ds.Available, "valuta/disponibilità DeepSeek");
+
+            // il costo arriva una volta per valuta: vale quella del saldo, non la prima
+            var usd = new DeepSeekUsage { Currency = "USD", Available = true };
+            DeepSeekUsage.Parse(DsAmountSample, DsCostTwoCurrencies, usd, new DateTime(2026, 9, 1));
+            Check(Math.Abs(usd.MonthValue - 9.25) < 0.001,
+                  $"spesa del mese presa dalla valuta sbagliata: {usd.MonthValue}");
+            Check(Math.Abs(usd.Days[0].Cost - 0.75) < 0.001,
+                  $"costo del giorno preso dalla valuta sbagliata: {usd.Days[0].Cost}");
+            Say("deepseek-valuta", $"blocchi CNY+USD: usati i valori {usd.Currency} " +
+                                   $"({usd.MonthValue:0.00} mese, {usd.Days[0].Cost:0.00} giorno)");
             ds.TodayCost = "0,60 CNY";                       // solo per il disegno di controllo
             Say("deepseek", $"2 modelli ({string.Join(", ", ds.Models.Select(m => $"{m.Name} {AiUsage.Tokens(m.Tokens)} · {m.HitPct:0}% hit · {m.Cost:0.00}"))}) · " +
                            $"mese {ds.MonthValue:0.00} {ds.Currency} · {ds.Days.Count} giorni · saldo {ds.Balance}");
@@ -873,6 +883,15 @@ static class SelfTest
     {"type":"PROMPT_CACHE_MISS_TOKEN","amount":"800000"}]}]},
   {"date":"2026-09-18","data":[{"model":"deepseek-chat","usage":[
     {"type":"PROMPT_CACHE_HIT_TOKEN","amount":"8000000"}]}]}]}}}
+""";
+
+    // /cost risponde con un blocco per valuta, il CNY per primo
+    const string DsCostTwoCurrencies = """
+{"data":{"biz_data":[
+ {"currency":"CNY","total":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"0"}]}],
+  "days":[{"date":"2026-09-12","data":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"0"}]}]}]},
+ {"currency":"USD","total":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"9.25"}]}],
+  "days":[{"date":"2026-09-12","data":[{"model":"deepseek-chat","usage":[{"type":"PROMPT_CACHE_HIT_TOKEN","amount":"0.75"}]}]}]}]}}
 """;
 
     const string DsCostSample = """

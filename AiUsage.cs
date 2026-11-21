@@ -560,8 +560,9 @@ sealed class DeepSeekUsage
     /// <summary>Riempie modelli e giorni del mese dalle due risposte JSON.</summary>
     public static void Parse(string amountJson, string costJson, DeepSeekUsage u, DateTime month)
     {
-        var costs = CostByModel(costJson);
-        var costDays = CostByDay(costJson);
+        // /cost restituisce un blocco per valuta (CNY e USD): conta quello del saldo
+        var costs = CostByModel(costJson, u.Currency);
+        var costDays = CostByDay(costJson, u.Currency);
         var total = new List<(string model, List<(string type, double amount)> usage)>();
         var days = new List<(string date, List<(string model, List<(string type, double amount)> usage)> data)>();
         using (var doc = JsonDocument.Parse(amountJson))
@@ -643,11 +644,11 @@ sealed class DeepSeekUsage
     }
 
     /// <summary>Nel JSON del costo i valori sono importi: si escludono le richieste.</summary>
-    static Dictionary<string, double> CostByModel(string json)
+    static Dictionary<string, double> CostByModel(string json, string currency)
     {
         var res = new Dictionary<string, double>();
         using var doc = JsonDocument.Parse(json);
-        if (!Data(doc.RootElement, out var biz) || !biz.TryGetProperty("total", out var t)
+        if (!Data(doc.RootElement, out var biz, currency) || !biz.TryGetProperty("total", out var t)
             || t.ValueKind != JsonValueKind.Array) return res;
         foreach (var m in t.EnumerateArray())
         {
@@ -661,11 +662,11 @@ sealed class DeepSeekUsage
         return res;
     }
 
-    static Dictionary<string, double> CostByDay(string json)
+    static Dictionary<string, double> CostByDay(string json, string currency)
     {
         var res = new Dictionary<string, double>();
         using var doc = JsonDocument.Parse(json);
-        if (!Data(doc.RootElement, out var biz) || !biz.TryGetProperty("days", out var days)
+        if (!Data(doc.RootElement, out var biz, currency) || !biz.TryGetProperty("days", out var days)
             || days.ValueKind != JsonValueKind.Array) return res;
         foreach (var day in days.EnumerateArray())
         {
@@ -681,8 +682,10 @@ sealed class DeepSeekUsage
         return res;
     }
 
-    /// <summary>data.biz_data è un oggetto in /amount e un array in /cost: accetta entrambi.</summary>
-    static bool Data(JsonElement root, out JsonElement biz)
+    /// <summary>data.biz_data è un oggetto in /amount e un array in /cost. In /cost ce n'è
+    /// uno per valuta (CNY e USD): si prende quello della valuta del saldo, altrimenti il
+    /// primo. Prima si usava sempre il primo, che è il CNY: costo di oggi sempre 0.</summary>
+    static bool Data(JsonElement root, out JsonElement biz, string currency = "")
     {
         biz = default;
         if (root.ValueKind != JsonValueKind.Object) return false;
@@ -691,7 +694,17 @@ sealed class DeepSeekUsage
         if (b.ValueKind == JsonValueKind.Array)
         {
             if (b.GetArrayLength() == 0) return false;
-            b = b[0];
+            var pick = b[0];
+            if (currency.Length > 0)
+                foreach (var e in b.EnumerateArray())
+                    if (e.ValueKind == JsonValueKind.Object
+                        && e.TryGetProperty("currency", out var c) && c.ValueKind == JsonValueKind.String
+                        && string.Equals(c.GetString(), currency, StringComparison.OrdinalIgnoreCase))
+                    {
+                        pick = e;
+                        break;
+                    }
+            b = pick;
         }
         if (b.ValueKind != JsonValueKind.Object) return false;
         biz = b;
